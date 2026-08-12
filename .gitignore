@@ -11,5 +11,6 @@ local.properties
 *.apk
 *.aab
 release-dist/
+prerelease/
 .idea/
 *.iml
