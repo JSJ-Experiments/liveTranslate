@@ -42,8 +42,7 @@ credentials from a backend.
 
 - Kotlin, Jetpack Compose, Material 3, edge-to-edge UI
 - AGP 9.3 built-in Kotlin and its compatible Kotlin/Compose compiler
-- Android 17 compile/target SDK; supports Android 8 through Android 17,
-  including Android 16
+- Android 16 compile/target SDK; supports Android 8 and newer
 - StateFlow + ViewModel, DataStore, coroutines, OkHttp WebSocket
 - One app module; no DI framework, database, navigation graph, or background
   service until the product needs them
