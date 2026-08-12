@@ -3,6 +3,7 @@ package com.jadenjsj.livetranslate
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -22,6 +23,12 @@ class SettingsRepository(private val context: Context) {
             sampleRate = preferences[SAMPLE_RATE]?.toIntOrNull()?.takeIf { it == 8_000 || it == 16_000 } ?: 16_000,
             chunkMilliseconds = preferences[CHUNK_MILLISECONDS]?.toIntOrNull()?.takeIf { it in setOf(40, 100, 200) } ?: 100,
             hotwords = preferences[HOTWORDS].orEmpty(),
+            primaryLanguage = preferences[PRIMARY_LANGUAGE]?.takeIf(::isSupportedLanguage) ?: "en",
+            secondaryLanguage = preferences[SECONDARY_LANGUAGE]?.takeIf(::isSupportedLanguage) ?: "zh",
+            triggerMode = runCatching {
+                TriggerMode.valueOf(preferences[TRIGGER_MODE] ?: TriggerMode.Hold.name)
+            }.getOrDefault(TriggerMode.Hold),
+            saveHistory = preferences[SAVE_HISTORY] ?: true,
         )
     }
 
@@ -33,6 +40,10 @@ class SettingsRepository(private val context: Context) {
             preferences[SAMPLE_RATE] = settings.sampleRate.toString()
             preferences[CHUNK_MILLISECONDS] = settings.chunkMilliseconds.toString()
             preferences[HOTWORDS] = settings.hotwords.trim()
+            preferences[PRIMARY_LANGUAGE] = settings.primaryLanguage
+            preferences[SECONDARY_LANGUAGE] = settings.secondaryLanguage
+            preferences[TRIGGER_MODE] = settings.triggerMode.name
+            preferences[SAVE_HISTORY] = settings.saveHistory
         }
     }
 
@@ -42,5 +53,11 @@ class SettingsRepository(private val context: Context) {
         val SAMPLE_RATE = stringPreferencesKey("sample_rate")
         val CHUNK_MILLISECONDS = stringPreferencesKey("chunk_milliseconds")
         val HOTWORDS = stringPreferencesKey("hotwords")
+        val PRIMARY_LANGUAGE = stringPreferencesKey("primary_language")
+        val SECONDARY_LANGUAGE = stringPreferencesKey("secondary_language")
+        val TRIGGER_MODE = stringPreferencesKey("trigger_mode")
+        val SAVE_HISTORY = booleanPreferencesKey("save_history")
     }
 }
+
+private fun isSupportedLanguage(code: String): Boolean = supportedLanguages.any { it.code == code }

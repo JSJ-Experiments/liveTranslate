@@ -30,12 +30,56 @@ enum class TranslationDirection(
     ),
 }
 
+fun TranslationDirection.sourceLanguage(settings: AppSettings): String? = when (this) {
+    TranslationDirection.Auto -> null
+    TranslationDirection.EnglishToChinese -> settings.primaryLanguage
+    TranslationDirection.ChineseToEnglish -> settings.secondaryLanguage
+}
+
+fun TranslationDirection.targetLanguage(settings: AppSettings): String = when (this) {
+    TranslationDirection.Auto, TranslationDirection.EnglishToChinese -> settings.secondaryLanguage
+    TranslationDirection.ChineseToEnglish -> settings.primaryLanguage
+}
+
+fun TranslationDirection.shortLabel(settings: AppSettings): String = when (this) {
+    TranslationDirection.Auto -> "AUTO"
+    TranslationDirection.EnglishToChinese -> "${settings.primaryLanguage.uppercase()} → ${settings.secondaryLanguage.uppercase()}"
+    TranslationDirection.ChineseToEnglish -> "${settings.secondaryLanguage.uppercase()} → ${settings.primaryLanguage.uppercase()}"
+}
+
+data class LanguageOption(val code: String, val label: String)
+
+val supportedLanguages = listOf(
+    "zh" to "Chinese", "en" to "English", "ar" to "Arabic", "de" to "German",
+    "fr" to "French", "es" to "Spanish", "pt" to "Portuguese", "id" to "Indonesian",
+    "it" to "Italian", "ko" to "Korean", "ru" to "Russian", "th" to "Thai",
+    "vi" to "Vietnamese", "ja" to "Japanese", "tr" to "Turkish", "hi" to "Hindi",
+    "ms" to "Malay", "nl" to "Dutch", "ur" to "Urdu", "nb" to "Norwegian Bokmål",
+    "sv" to "Swedish", "da" to "Danish", "he" to "Hebrew", "fi" to "Finnish",
+    "pl" to "Polish", "is" to "Icelandic", "cs" to "Czech", "fil" to "Filipino",
+    "fa" to "Persian", "yue" to "Cantonese", "el" to "Greek", "af" to "Afrikaans",
+    "ast" to "Asturian", "be" to "Belarusian", "bg" to "Bulgarian", "bn" to "Bengali",
+    "bs" to "Bosnian", "ca" to "Catalan", "ceb" to "Cebuano", "et" to "Estonian",
+    "gl" to "Galician", "gu" to "Gujarati", "hr" to "Croatian", "hu" to "Hungarian",
+    "jv" to "Javanese", "kk" to "Kazakh", "kn" to "Kannada", "ky" to "Kyrgyz",
+    "lv" to "Latvian", "mk" to "Macedonian", "ml" to "Malayalam", "mr" to "Marathi",
+    "pa" to "Punjabi", "ro" to "Romanian", "sk" to "Slovak", "sl" to "Slovenian",
+    "sw" to "Swahili", "tg" to "Tajik", "az" to "Azerbaijani", "uk" to "Ukrainian",
+).map { LanguageOption(it.first, it.second) }
+
+enum class TriggerMode(val label: String) {
+    Hold("Hold to talk"),
+    Tap("Tap to start / stop"),
+}
+
 data class TranslationTurn(
     val id: Long,
     val sourceText: String,
     val translationText: String,
     val sourceLanguage: String?,
     val targetLanguage: String,
+    val createdAtMillis: Long = System.currentTimeMillis(),
+    val audioPath: String? = null,
 )
 
 enum class Region(val hostPart: String, val label: String) {
@@ -50,6 +94,10 @@ data class AppSettings(
     val sampleRate: Int = 16_000,
     val chunkMilliseconds: Int = 100,
     val hotwords: String = "",
+    val primaryLanguage: String = "en",
+    val secondaryLanguage: String = "zh",
+    val triggerMode: TriggerMode = TriggerMode.Hold,
+    val saveHistory: Boolean = true,
 ) {
     val isComplete: Boolean get() = apiKey.isNotBlank() && workspaceId.isNotBlank()
 }

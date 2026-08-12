@@ -52,6 +52,15 @@ class QwenProtocolTest {
     }
 
     @Test
+    fun `manual direction uses the selected language pair`() {
+        val settings = AppSettings(primaryLanguage = "ja", secondaryLanguage = "fr")
+        val forward = JSONObject(sessionUpdate(TranslationDirection.EnglishToChinese, settings))
+            .getJSONObject("session")
+        assertEquals("ja", forward.getJSONObject("input_audio_transcription").getString("language"))
+        assertEquals("fr", forward.getJSONObject("translation").getString("language"))
+    }
+
+    @Test
     fun `parses source and translation previews using confirmed plus tentative text`() {
         assertEquals(
             QwenServerEvent.SourcePreview("How are you?", "en"),

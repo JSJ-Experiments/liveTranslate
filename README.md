@@ -5,9 +5,14 @@ A small, native push-to-talk translator using Alibaba Cloud's
 
 ## MVP features
 
-- Automatic Chinese ↔ English direction, plus explicit manual directions.
-- Compact, scrollable conversation history with live source and translation text.
+- Automatic direction for a user-selectable pair of Qwen's 60 supported languages,
+  plus explicit manual directions.
+- Compact, persistent conversation history with live source and translation text.
+  It follows new text until the user scrolls away.
 - True hold-to-talk interaction with visible microphone glow and release-to-send.
+- Configurable hold-to-talk or tap-to-start/tap-to-send microphone interaction.
+- Optional app-private WAV recording and raw Qwen JSONL event archive per turn,
+  with recording playback from the transcript.
 - Explicit connection states: disconnected, connecting, live, sending, and translating.
 - On-device connection test with authenticated WebSocket handshake latency.
 - In-app settings for API key, workspace, Beijing/Singapore region, 8/16 kHz
@@ -38,7 +43,7 @@ option halves that.
 
 Qwen can auto-detect the source language but still requires one target language.
 In Auto mode the app listens for Qwen's detected source code while audio streams,
-updates the target to the other side of the Chinese/English pair, then commits
+updates the target to the other side of the selected pair, then commits
 the push-to-talk turn. Manual direction buttons remain available as a fallback.
 
 API keys are region-bound. The stored key is encrypted at rest with Android

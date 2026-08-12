@@ -8,6 +8,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -35,6 +36,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -51,7 +54,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -83,6 +88,7 @@ fun LiveTranslateScreen(
     onSaveSettings: (AppSettings) -> Unit,
     onTestConnection: (AppSettings) -> Unit,
     onClear: () -> Unit,
+    onPlayTurn: (TranslationTurn) -> Unit,
     onTalkStart: () -> Unit,
     onTalkStop: () -> Unit,
 ) {
@@ -108,14 +114,16 @@ fun LiveTranslateScreen(
                 .padding(horizontal = 18.dp),
         ) {
             Header(state, onOpenSettings, onClear)
-            DirectionPicker(state.direction, !state.isActive, onDirectionChange)
+            DirectionPicker(state.direction, state.settings, !state.isActive, onDirectionChange)
             Conversation(
                 state = state,
                 modifier = Modifier.weight(1f),
+                onPlayTurn = onPlayTurn,
             )
             PushToTalk(
                 phase = state.phase,
                 ready = state.settings.isComplete,
+                triggerMode = state.settings.triggerMode,
                 onStart = onTalkStart,
                 onStop = onTalkStop,
             )
@@ -198,6 +206,7 @@ private fun ConnectionStatus(state: TranslationUiState) {
 @Composable
 private fun DirectionPicker(
     selected: TranslationDirection,
+    settings: AppSettings,
     enabled: Boolean,
     onSelected: (TranslationDirection) -> Unit,
 ) {
@@ -219,7 +228,7 @@ private fun DirectionPicker(
                 tonalElevation = if (active) 2.dp else 0.dp,
             ) {
                 Text(
-                    text = direction.shortLabel,
+                    text = direction.shortLabel(settings),
                     modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelMedium,
@@ -234,13 +243,30 @@ private fun DirectionPicker(
 }
 
 @Composable
-private fun Conversation(state: TranslationUiState, modifier: Modifier = Modifier) {
+private fun Conversation(
+    state: TranslationUiState,
+    modifier: Modifier = Modifier,
+    onPlayTurn: (TranslationTurn) -> Unit,
+) {
     val listState = rememberLazyListState()
+    var followLatest by rememberSaveable { mutableStateOf(true) }
+    var autoScrolling by remember { mutableStateOf(false) }
     val hasLiveTurn = state.sourceText.isNotBlank() || state.translationText.isNotBlank() || state.isActive
     val itemCount = state.turns.size + if (hasLiveTurn) 1 else 0
 
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }.collect { (scrolling, canScrollForward) ->
+            if (!canScrollForward) followLatest = true
+            else if (scrolling && !autoScrolling) followLatest = false
+        }
+    }
+
     LaunchedEffect(itemCount, state.sourceText, state.translationText) {
-        if (itemCount > 0) listState.scrollToItem(itemCount - 1)
+        if (itemCount > 0 && followLatest) {
+            autoScrolling = true
+            listState.scrollToItem(itemCount - 1)
+            autoScrolling = false
+        }
     }
 
     if (itemCount == 0) {
@@ -254,9 +280,9 @@ private fun Conversation(state: TranslationUiState, modifier: Modifier = Modifie
                 Spacer(Modifier.height(5.dp))
                 Text(
                     if (state.direction == TranslationDirection.Auto) {
-                        "Chinese and English are detected automatically"
+                        "${languageLabel(state.settings.primaryLanguage)} and ${languageLabel(state.settings.secondaryLanguage)} are detected automatically"
                     } else {
-                        state.direction.shortLabel
+                        state.direction.shortLabel(state.settings)
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -278,6 +304,8 @@ private fun Conversation(state: TranslationUiState, modifier: Modifier = Modifie
                 sourceLanguage = turn.sourceLanguage,
                 targetLanguage = turn.targetLanguage,
                 live = false,
+                audioAvailable = turn.audioPath != null,
+                onPlay = { onPlayTurn(turn) },
             )
         }
         if (hasLiveTurn) {
@@ -285,9 +313,11 @@ private fun Conversation(state: TranslationUiState, modifier: Modifier = Modifie
                 TranscriptTurn(
                     sourceText = state.sourceText,
                     translationText = state.translationText,
-                    sourceLanguage = state.detectedSourceLanguage ?: state.direction.sourceLanguage,
+                    sourceLanguage = state.detectedSourceLanguage ?: state.direction.sourceLanguage(state.settings),
                     targetLanguage = state.activeTargetLanguage,
                     live = state.isActive,
+                    audioAvailable = false,
+                    onPlay = {},
                 )
             }
         }
@@ -301,6 +331,8 @@ private fun TranscriptTurn(
     sourceLanguage: String?,
     targetLanguage: String,
     live: Boolean,
+    audioAvailable: Boolean,
+    onPlay: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -343,6 +375,13 @@ private fun TranscriptTurn(
                 fontWeight = FontWeight.SemiBold,
             )
         }
+        if (audioAvailable) {
+            TextButton(onClick = onPlay, contentPadding = PaddingValues(0.dp)) {
+                Icon(painterResource(R.drawable.ic_play), null, Modifier.size(17.dp))
+                Spacer(Modifier.size(5.dp))
+                Text("Play recording", style = MaterialTheme.typography.labelMedium)
+            }
+        }
         HorizontalDivider(
             modifier = Modifier.padding(top = 20.dp),
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
@@ -354,13 +393,14 @@ private fun languageLabel(code: String?): String = when {
     code == null -> "AUTO"
     code == "zh" || code.startsWith("zh-") -> "中文"
     code == "en" || code.startsWith("en-") -> "ENGLISH"
-    else -> code.uppercase()
+    else -> supportedLanguages.firstOrNull { it.code == code }?.label?.uppercase() ?: code.uppercase()
 }
 
 @Composable
 private fun PushToTalk(
     phase: SessionPhase,
     ready: Boolean,
+    triggerMode: TriggerMode,
     onStart: () -> Unit,
     onStop: () -> Unit,
 ) {
@@ -380,14 +420,17 @@ private fun PushToTalk(
     val currentStart by rememberUpdatedState(onStart)
     val currentStop by rememberUpdatedState(onStop)
     val canStart by rememberUpdatedState(ready && (phase == SessionPhase.Idle || phase == SessionPhase.Error))
+    val currentPhase by rememberUpdatedState(phase)
+    val currentTriggerMode by rememberUpdatedState(triggerMode)
 
     val text = when (phase) {
-        SessionPhase.Connecting -> "CONNECTING · KEEP HOLDING"
-        SessionPhase.Listening -> "LISTENING · RELEASE TO SEND"
+        SessionPhase.Connecting -> if (triggerMode == TriggerMode.Hold) "CONNECTING · KEEP HOLDING" else "CONNECTING…"
+        SessionPhase.Listening -> if (triggerMode == TriggerMode.Hold) "LISTENING · RELEASE TO SEND" else "LISTENING · TAP TO SEND"
         SessionPhase.Sending -> "SENDING…"
         SessionPhase.Translating -> "TRANSLATING…"
         SessionPhase.Testing -> "TESTING CONNECTION…"
-        else -> if (ready) "HOLD TO TALK" else "SET UP CONNECTION"
+        else -> if (!ready) "SET UP CONNECTION"
+        else if (triggerMode == TriggerMode.Hold) "HOLD TO TALK" else "TAP TO START"
     }
     Column(
         modifier = Modifier
@@ -401,12 +444,23 @@ private fun PushToTalk(
                 .size(84.dp)
                 .semantics {
                     role = Role.Button
-                    contentDescription = "Push to talk. Hold while speaking, then release to send."
+                    contentDescription = if (triggerMode == TriggerMode.Hold) {
+                        "Push to talk. Hold while speaking, then release to send."
+                    } else {
+                        "Tap to start or stop recording."
+                    }
                 }
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false)
-                        if (canStart) {
+                        if (currentTriggerMode == TriggerMode.Tap) {
+                            waitForUpOrCancellation()
+                            when (currentPhase) {
+                                SessionPhase.Idle, SessionPhase.Error -> if (canStart) currentStart()
+                                SessionPhase.Connecting, SessionPhase.Listening -> currentStop()
+                                else -> Unit
+                            }
+                        } else if (canStart) {
                             currentStart()
                             try {
                                 waitForUpOrCancellation()
@@ -472,6 +526,10 @@ private fun SettingsSheet(
     var sampleRate by rememberSaveable(initial.sampleRate) { mutableStateOf(initial.sampleRate) }
     var chunkMilliseconds by rememberSaveable(initial.chunkMilliseconds) { mutableStateOf(initial.chunkMilliseconds) }
     var hotwords by rememberSaveable(initial.hotwords) { mutableStateOf(initial.hotwords) }
+    var primaryLanguage by rememberSaveable(initial.primaryLanguage) { mutableStateOf(initial.primaryLanguage) }
+    var secondaryLanguage by rememberSaveable(initial.secondaryLanguage) { mutableStateOf(initial.secondaryLanguage) }
+    var triggerMode by rememberSaveable(initial.triggerMode.name) { mutableStateOf(initial.triggerMode.name) }
+    var saveHistory by rememberSaveable(initial.saveHistory) { mutableStateOf(initial.saveHistory) }
     var showKey by rememberSaveable { mutableStateOf(false) }
 
     fun draft() = AppSettings(
@@ -481,6 +539,10 @@ private fun SettingsSheet(
         sampleRate = sampleRate,
         chunkMilliseconds = chunkMilliseconds,
         hotwords = hotwords,
+        primaryLanguage = primaryLanguage,
+        secondaryLanguage = secondaryLanguage,
+        triggerMode = TriggerMode.valueOf(triggerMode),
+        saveHistory = saveHistory,
     )
 
     ModalBottomSheet(
@@ -533,6 +595,12 @@ private fun SettingsSheet(
 
             HorizontalDivider()
             SectionLabel("AUDIO")
+            Text("Microphone trigger", style = MaterialTheme.typography.labelLarge)
+            ChoiceRow(
+                choices = TriggerMode.entries.map { it.name to it.label },
+                selected = triggerMode,
+                onSelect = { triggerMode = it },
+            )
             ReadOnlySetting(
                 "Format",
                 "PCM 16-bit mono",
@@ -558,10 +626,16 @@ private fun SettingsSheet(
 
             HorizontalDivider()
             SectionLabel("TRANSLATION")
+            LanguagePicker("Language A", primaryLanguage) { selected ->
+                if (selected != secondaryLanguage) primaryLanguage = selected
+            }
+            LanguagePicker("Language B", secondaryLanguage) { selected ->
+                if (selected != primaryLanguage) secondaryLanguage = selected
+            }
             ReadOnlySetting(
                 "Automatic direction",
                 "Source language auto-detection",
-                "In Auto mode, Qwen detects the source and the app switches the target between Chinese and English before the push-to-talk turn is committed.",
+                "In Auto mode, Qwen detects the source and the app switches the target between the selected language pair before the turn is committed.",
             )
             OutlinedTextField(
                 value = hotwords,
@@ -573,6 +647,17 @@ private fun SettingsSheet(
                 supportingText = { Text("One source=translation pair per line") },
             )
             ReadOnlySetting("Output", "Text only", "Spoken output is deferred until the translation path is reliable.")
+            Text("Local history", style = MaterialTheme.typography.labelLarge)
+            ChoiceRow(
+                choices = listOf("true" to "Save text + WAV + events", "false" to "Don't save"),
+                selected = saveHistory.toString(),
+                onSelect = { saveHistory = it.toBoolean() },
+            )
+            Text(
+                "Saved history stays in app-private storage. Clearing the conversation deletes its text, WAV recordings, and raw Qwen event logs.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             HorizontalDivider()
             Button(
@@ -600,6 +685,35 @@ private fun SettingsSheet(
                 onClick = { onSave(draft()) },
             ) {
                 Text("Save settings")
+            }
+        }
+    }
+}
+
+@Composable
+private fun LanguagePicker(label: String, selectedCode: String, onSelected: (String) -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val selected = supportedLanguages.firstOrNull { it.code == selectedCode }
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = "${selected?.label ?: selectedCode} · ${selectedCode.uppercase()}",
+            onValueChange = {},
+            modifier = Modifier
+                .fillMaxWidth(),
+            label = { Text(label) },
+            readOnly = true,
+            enabled = true,
+        )
+        Box(Modifier.matchParentSize().clickable { expanded = true })
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            supportedLanguages.forEach { language ->
+                DropdownMenuItem(
+                    text = { Text("${language.label} · ${language.code}") },
+                    onClick = {
+                        onSelected(language.code)
+                        expanded = false
+                    },
+                )
             }
         }
     }

@@ -1,28 +1,37 @@
 package com.jadenjsj.livetranslate
 
 import android.app.Application
+import android.media.MediaPlayer
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import kotlin.time.TimeSource
 
 class TranslationViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = SettingsRepository(application)
     private val microphone = MicrophoneRecorder(application)
+    private val history = HistoryRepository(application)
     private val mutableState = MutableStateFlow(TranslationUiState())
     val state: StateFlow<TranslationUiState> = mutableState.asStateFlow()
 
     private var audioChannel: Channel<ByteArray>? = null
     private var sessionJob: kotlinx.coroutines.Job? = null
     private var testJob: kotlinx.coroutines.Job? = null
+    private var mediaPlayer: MediaPlayer? = null
 
     init {
+        viewModelScope.launch {
+            val savedTurns = withContext(Dispatchers.IO) { history.load() }
+            mutableState.update { it.copy(turns = savedTurns) }
+        }
         viewModelScope.launch {
             repository.settings.collect { settings ->
                 mutableState.update {
@@ -61,6 +70,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                     error = null,
                 )
             }
+            viewModelScope.launch(Dispatchers.IO) { history.clear() }
         }
     }
 
@@ -68,6 +78,22 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         mutableState.update {
             it.copy(phase = SessionPhase.Error, error = "Microphone permission is required for push-to-talk")
         }
+    }
+
+    fun playRecording(turn: TranslationTurn) {
+        val path = turn.audioPath ?: return
+        mediaPlayer?.release()
+        mediaPlayer = runCatching {
+            MediaPlayer().apply {
+                setDataSource(path)
+                prepare()
+                setOnCompletionListener {
+                    it.release()
+                    if (mediaPlayer === it) mediaPlayer = null
+                }
+                start()
+            }
+        }.getOrNull()
     }
 
     fun startTalking() {
@@ -79,6 +105,12 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         val channel = Channel<ByteArray>(Channel.UNLIMITED)
+        val turnId = System.currentTimeMillis()
+        val capture = if (snapshot.settings.saveHistory) {
+            runCatching { history.begin(turnId, snapshot.settings.sampleRate) }.getOrNull()
+        } else {
+            null
+        }
         audioChannel = channel
         mutableState.update {
             it.copy(
@@ -86,7 +118,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 sourceText = "",
                 translationText = "",
                 detectedSourceLanguage = null,
-                activeTargetLanguage = snapshot.direction.targetLanguage,
+                activeTargetLanguage = snapshot.direction.targetLanguage(snapshot.settings),
                 error = null,
             )
         }
@@ -96,10 +128,14 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 scope = viewModelScope,
                 sampleRate = snapshot.settings.sampleRate,
                 chunkMilliseconds = snapshot.settings.chunkMilliseconds,
-                onAudio = { channel.trySend(it) },
+                onAudio = {
+                    capture?.appendAudio(it)
+                    channel.trySend(it)
+                },
             )
         } catch (error: Throwable) {
             channel.close()
+            capture?.discard()
             showError(error)
             return
         }
@@ -107,7 +143,12 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         sessionJob = viewModelScope.launch {
             var session: QwenRealtimeSession? = null
             try {
-                session = QwenRealtimeSession(snapshot.settings, snapshot.direction, ::handleEvent)
+                session = QwenRealtimeSession(
+                    snapshot.settings,
+                    snapshot.direction,
+                    ::handleEvent,
+                    capture?.let { saved -> saved::appendServerEvent } ?: {},
+                )
                 session.connect()
                 mutableState.update {
                     if (it.phase == SessionPhase.Connecting) it.copy(phase = SessionPhase.Listening) else it
@@ -125,20 +166,10 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                     session.commit()
                 }
                 session.awaitFinished()
+                val completedTurn = archiveCurrentTurn(turnId, snapshot, capture)
                 mutableState.update { current ->
-                    val completed = if (current.sourceText.isNotBlank() || current.translationText.isNotBlank()) {
-                        current.turns + TranslationTurn(
-                            id = System.nanoTime(),
-                            sourceText = current.sourceText,
-                            translationText = current.translationText,
-                            sourceLanguage = current.detectedSourceLanguage ?: snapshot.direction.sourceLanguage,
-                            targetLanguage = current.activeTargetLanguage,
-                        )
-                    } else {
-                        current.turns
-                    }
                     current.copy(
-                        turns = completed,
+                        turns = completedTurn?.let { current.turns + it } ?: current.turns,
                         sourceText = "",
                         translationText = "",
                         detectedSourceLanguage = null,
@@ -147,6 +178,32 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                     )
                 }
             } catch (error: Throwable) {
+                val partial = archiveCurrentTurn(turnId, snapshot, capture)
+                if (partial != null) {
+                    mutableState.update {
+                        it.copy(
+                            turns = it.turns + partial,
+                            sourceText = "",
+                            translationText = "",
+                            detectedSourceLanguage = null,
+                        )
+                    }
+                } else {
+                    capture?.let { debugCapture ->
+                        withContext(Dispatchers.IO) {
+                            debugCapture.complete(
+                                TranslationTurn(
+                                    id = turnId,
+                                    sourceText = "",
+                                    translationText = "",
+                                    sourceLanguage = snapshot.direction.sourceLanguage(snapshot.settings),
+                                    targetLanguage = snapshot.direction.targetLanguage(snapshot.settings),
+                                    createdAtMillis = turnId,
+                                ),
+                            )
+                        }
+                    }
+                }
                 showError(error)
             } finally {
                 microphone.stop()
@@ -154,6 +211,24 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 session?.close()
             }
         }
+    }
+
+    private suspend fun archiveCurrentTurn(
+        id: Long,
+        snapshot: TranslationUiState,
+        capture: TurnCapture?,
+    ): TranslationTurn? {
+        val current = state.value
+        if (current.sourceText.isBlank() && current.translationText.isBlank()) return null
+        val turn = TranslationTurn(
+            id = id,
+            sourceText = current.sourceText,
+            translationText = current.translationText,
+            sourceLanguage = current.detectedSourceLanguage ?: snapshot.direction.sourceLanguage(snapshot.settings),
+            targetLanguage = current.activeTargetLanguage,
+            createdAtMillis = id,
+        )
+        return if (capture == null) turn else withContext(Dispatchers.IO) { capture.complete(turn) }
     }
 
     fun stopTalking() {
@@ -208,9 +283,13 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     private fun TranslationUiState.withSource(text: String, language: String?): TranslationUiState {
         val detected = language?.lowercase() ?: detectedSourceLanguage
         val target = if (direction == TranslationDirection.Auto && detected != null) {
-            if (detected == "zh" || detected.startsWith("zh-")) "en" else "zh"
+            when (detected) {
+                settings.primaryLanguage -> settings.secondaryLanguage
+                settings.secondaryLanguage -> settings.primaryLanguage
+                else -> settings.secondaryLanguage
+            }
         } else {
-            direction.targetLanguage
+            direction.targetLanguage(settings)
         }
         return copy(
             sourceText = text,
@@ -236,5 +315,6 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         audioChannel?.close()
         sessionJob?.cancel()
         testJob?.cancel()
+        mediaPlayer?.release()
     }
 }

@@ -18,6 +18,7 @@ internal class QwenRealtimeSession(
     private val settings: AppSettings,
     private val direction: TranslationDirection,
     private val onEvent: (QwenServerEvent) -> Unit,
+    private val onRawEvent: (String) -> Unit = {},
 ) : Closeable {
     private val connected = CompletableDeferred<Unit>()
     private val finished = CompletableDeferred<Unit>()
@@ -28,7 +29,7 @@ internal class QwenRealtimeSession(
     private var webSocket: WebSocket? = null
     @Volatile private var inputCommitted = false
     @Volatile private var finishSent = false
-    @Volatile private var currentTargetLanguage = direction.targetLanguage
+    @Volatile private var currentTargetLanguage = direction.targetLanguage(settings)
     @Volatile private var pendingTranslationUpdate: CompletableDeferred<Unit>? = null
 
     suspend fun connect() = withContext(Dispatchers.IO) {
@@ -88,6 +89,7 @@ internal class QwenRealtimeSession(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            onRawEvent(text)
             when (val event = parseServerEvent(text)) {
                 QwenServerEvent.SessionUpdated -> {
                     if (!connected.isCompleted) connected.complete(Unit)
@@ -115,7 +117,11 @@ internal class QwenRealtimeSession(
             }?.lowercase()?.takeIf(String::isNotBlank) ?: return
 
             detectedLanguage.complete(language)
-            val target = if (language == "zh" || language.startsWith("zh-")) "en" else "zh"
+            val target = when (language) {
+                settings.primaryLanguage -> settings.secondaryLanguage
+                settings.secondaryLanguage -> settings.primaryLanguage
+                else -> settings.secondaryLanguage
+            }
             if (target == currentTargetLanguage) return
 
             currentTargetLanguage = target

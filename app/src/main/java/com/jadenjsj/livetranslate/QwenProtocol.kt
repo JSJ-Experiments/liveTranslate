@@ -14,7 +14,7 @@ internal fun buildQwenUrl(workspaceId: String, region: Region): String {
 internal fun sessionUpdate(
     direction: TranslationDirection,
     settings: AppSettings = AppSettings(),
-    targetLanguage: String = direction.targetLanguage,
+    targetLanguage: String = direction.targetLanguage(settings),
 ): String = event("session.update") {
     val translation = JSONObject().put("language", targetLanguage)
     parseHotwords(settings.hotwords).takeIf { it.length() > 0 }?.let { phrases ->
@@ -28,7 +28,7 @@ internal fun sessionUpdate(
             .put("input_audio_format", "pcm")
             .put("input_audio_transcription", JSONObject().apply {
                 put("model", "qwen3-asr-flash-realtime")
-                direction.sourceLanguage?.let { put("language", it) }
+                direction.sourceLanguage(settings)?.let { put("language", it) }
             })
             .put("turn_detection", JSONObject.NULL)
             .put("translation", translation),

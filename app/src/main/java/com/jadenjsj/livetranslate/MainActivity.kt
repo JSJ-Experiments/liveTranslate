@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
                     onSaveSettings = viewModel::saveSettings,
                     onTestConnection = viewModel::testConnection,
                     onClear = viewModel::clearTranscript,
+                    onPlayTurn = viewModel::playRecording,
                     onTalkStart = {
                         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                             viewModel.startTalking()
