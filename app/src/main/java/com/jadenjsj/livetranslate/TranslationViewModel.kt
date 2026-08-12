@@ -250,7 +250,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             val started = TimeSource.Monotonic.markNow()
             var session: QwenRealtimeSession? = null
             try {
-                session = QwenRealtimeSession(settings, state.value.direction) {}
+                session = QwenRealtimeSession(settings, state.value.direction, onEvent = {})
                 session.connect()
                 val latency = started.elapsedNow().inWholeMilliseconds
                 session.finish()

@@ -63,7 +63,8 @@ internal class TurnCapture(
     @Synchronized
     fun appendServerEvent(raw: String) {
         if (closed) return
-        events.append(raw).newLine()
+        events.append(raw)
+        events.newLine()
         events.flush()
     }
 
