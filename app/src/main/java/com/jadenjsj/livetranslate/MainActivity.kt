@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
                     onSeekPlayback = viewModel::seekPlayback,
                     onPlaybackSpeed = viewModel::setPlaybackSpeed,
                     onRetry = viewModel::forceRetry,
+                    onCancelPending = viewModel::cancelPendingTranslation,
                     onTalkStart = {
                         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                             viewModel.startTalking()

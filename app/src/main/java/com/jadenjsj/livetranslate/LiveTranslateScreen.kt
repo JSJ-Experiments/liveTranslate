@@ -98,6 +98,7 @@ fun LiveTranslateScreen(
     onSeekPlayback: (Long) -> Unit,
     onPlaybackSpeed: (Float) -> Unit,
     onRetry: () -> Unit,
+    onCancelPending: () -> Unit,
     onTalkStart: () -> Unit,
     onTalkStop: () -> Unit,
 ) {
@@ -112,7 +113,7 @@ fun LiveTranslateScreen(
                 onCloseHistorySession, onTogglePlayback, onSeekPlayback, onPlaybackSpeed,
             )
         } else {
-            InterpreterScreen(state, onOpenHistory, onOpenSettings, onRetry, onTalkStart, onTalkStop)
+            InterpreterScreen(state, onOpenHistory, onOpenSettings, onRetry, onCancelPending, onTalkStart, onTalkStop)
         }
     }
 
@@ -134,6 +135,7 @@ private fun InterpreterScreen(
     onOpenHistory: () -> Unit,
     onOpenSettings: () -> Unit,
     onRetry: () -> Unit,
+    onCancelPending: () -> Unit,
     onTalkStart: () -> Unit,
     onTalkStop: () -> Unit,
 ) {
@@ -145,7 +147,7 @@ private fun InterpreterScreen(
             .padding(horizontal = 16.dp),
     ) {
         CompactTopBar(state, onOpenHistory, onOpenSettings)
-        AttentionBanner(state, onRetry)
+        AttentionBanner(state, onRetry, onCancelPending)
         LiveTranscript(state, Modifier.weight(1f))
         PushToTalk(
             phase = state.phase,
@@ -171,7 +173,7 @@ private fun CompactTopBar(
     ) {
         val dotColor = when {
             !state.isOnline || state.phase == SessionPhase.Error -> Color(0xFFE5484D)
-            state.phase in setOf(SessionPhase.Connecting, SessionPhase.Sending, SessionPhase.Testing) -> Color(0xFFF4A62A)
+            state.phase in setOf(SessionPhase.Connecting, SessionPhase.Queued, SessionPhase.Sending, SessionPhase.Testing) -> Color(0xFFF4A62A)
             state.phase in setOf(SessionPhase.Listening, SessionPhase.Translating) -> Color(0xFF20B86A)
             else -> MaterialTheme.colorScheme.outline
         }
@@ -203,6 +205,7 @@ private fun connectionDescription(state: TranslationUiState): String = when {
     !state.isOnline -> "Offline"
     state.phase == SessionPhase.Error -> "Connection error"
     state.phase == SessionPhase.Connecting -> "Connecting"
+    state.phase == SessionPhase.Queued -> "Recording queued locally"
     state.phase == SessionPhase.Listening -> "Connected"
     state.phase == SessionPhase.Sending -> "Sending"
     state.phase == SessionPhase.Translating -> "Connected and translating"
@@ -210,15 +213,16 @@ private fun connectionDescription(state: TranslationUiState): String = when {
 }
 
 @Composable
-private fun AttentionBanner(state: TranslationUiState, onRetry: () -> Unit) {
+private fun AttentionBanner(state: TranslationUiState, onRetry: () -> Unit, onCancelPending: () -> Unit) {
     val message = when {
-        !state.isOnline -> "Offline · reconnect to the internet before starting"
+        state.phase == SessionPhase.Queued -> state.error ?: "Recording saved locally · waiting to send…"
+        state.phase == SessionPhase.Connecting -> state.error ?: "Recording locally · connecting to Qwen…"
         state.phase == SessionPhase.Error -> state.error ?: "Translation connection failed"
-        state.phase == SessionPhase.Connecting -> state.error ?: "Connecting to Qwen…"
         state.phase == SessionPhase.Testing -> "Checking the Qwen connection…"
+        !state.isOnline -> "Offline · you can still record and it will send after reconnection"
         else -> null
     } ?: return
-    val warning = state.phase == SessionPhase.Connecting || state.phase == SessionPhase.Testing
+    val warning = state.phase in setOf(SessionPhase.Connecting, SessionPhase.Queued, SessionPhase.Testing)
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -237,8 +241,11 @@ private fun AttentionBanner(state: TranslationUiState, onRetry: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.SemiBold,
             )
-            if (!warning) {
-                TextButton(onClick = onRetry, enabled = state.phase != SessionPhase.Testing) { Text("Retry") }
+            if (state.phase != SessionPhase.Testing) {
+                TextButton(onClick = onRetry) { Text("Retry") }
+            }
+            if (state.phase == SessionPhase.Queued) {
+                TextButton(onClick = onCancelPending) { Text("Cancel") }
             }
         }
     }
@@ -616,7 +623,8 @@ private fun PushToTalk(
     val currentMode by rememberUpdatedState(triggerMode)
     val label = when (phase) {
         SessionPhase.Listening -> if (triggerMode == TriggerMode.Hold) "Listening · release to send" else "Listening · tap to send"
-        SessionPhase.Connecting -> "Connecting · keep speaking"
+        SessionPhase.Connecting -> "Recording locally · connecting…"
+        SessionPhase.Queued -> "Recorded locally · waiting to send"
         SessionPhase.Sending, SessionPhase.Translating -> "Sending · finishing translation"
         else -> if (!ready) "Open Settings to connect"
         else if (triggerMode == TriggerMode.Hold) "Hold to speak" else "Tap to start listening"
@@ -841,11 +849,16 @@ private fun SettingsSheet(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text("Sentence split pause", style = MaterialTheme.typography.labelLarge)
+            Text("End-of-speech silence", style = MaterialTheme.typography.labelLarge)
             ChoiceRow(
                 listOf("400" to "400 ms · fast", "700" to "700 ms", "1200" to "1.2 s · long"),
                 vadSilenceMilliseconds.toString(),
             ) { vadSilenceMilliseconds = it.toInt() }
+            Text(
+                "Qwen splits speech automatically with server VAD. This only controls how much silence counts as the end of an utterance; 700 ms is the balanced default.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             ReadOnlySetting("Format", "PCM 16-bit mono", "Opus remains deferred until packet interoperability is tested.")
             Text("Quality / sample rate", style = MaterialTheme.typography.labelLarge)
             ChoiceRow(listOf("8000" to "8 kHz · saver", "16000" to "16 kHz · best"), sampleRate.toString()) {

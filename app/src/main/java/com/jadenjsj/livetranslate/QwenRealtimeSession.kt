@@ -43,7 +43,7 @@ internal class QwenRealtimeSession(
             .build()
         webSocket = client.newWebSocket(request, Listener())
         try {
-            withTimeout(15_000) { connected.await() }
+            withTimeout(8_000) { connected.await() }
         } catch (error: Throwable) {
             close()
             throw error

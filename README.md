@@ -29,8 +29,13 @@ A small, native push-to-talk translator using Alibaba Cloud's
   key. It is never baked into the APK or build output.
 
 The app records immediately when push-to-talk is held. While the WebSocket is
-connecting, audio is buffered locally. Once authenticated, it is streamed to
-Qwen; releasing the button visibly enters the sending/finalizing states.
+connecting, audio is buffered locally. Releasing before connection queues the
+complete recording in memory and keeps reconnecting until it can be sent (or
+the user cancels). Once authenticated, it is streamed to Qwen.
+
+Qwen's server VAD automatically splits speech into utterances. The exposed
+end-of-speech silence option does not manually split text; it only tunes how
+long a pause must be before server VAD considers the utterance complete.
 
 ## Why PCM instead of Opus for now?
 

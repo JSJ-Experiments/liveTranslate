@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +39,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     private var testJob: kotlinx.coroutines.Job? = null
     private var mediaPlayer: MediaPlayer? = null
     private var playbackJob: kotlinx.coroutines.Job? = null
+    private val retrySignal = Channel<Unit>(Channel.CONFLATED)
     private val segmentIds = AtomicLong(System.currentTimeMillis())
 
     init {
@@ -252,7 +254,11 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             try {
                 sessions = connectSessionsWithRetry(snapshot, capture)
                 mutableState.update {
-                    if (it.phase == SessionPhase.Connecting) it.copy(phase = SessionPhase.Listening, error = null) else it
+                    when (it.phase) {
+                        SessionPhase.Connecting -> it.copy(phase = SessionPhase.Listening, error = null, isOnline = true)
+                        SessionPhase.Queued -> it.copy(phase = SessionPhase.Sending, error = null, isOnline = true)
+                        else -> it
+                    }
                 }
 
                 var bytesSent = 0L
@@ -280,6 +286,10 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 archiveConversation(conversationId, snapshot, capture)
                 mutableState.update { it.copy(phase = SessionPhase.Idle, error = null) }
                 debugLog.write("INFO", "Translation session finished with ${state.value.liveTurns.size} segment(s)")
+            } catch (cancelled: CancellationException) {
+                capture?.discard()
+                mutableState.update { it.copy(phase = SessionPhase.Idle, error = null) }
+                throw cancelled
             } catch (error: Throwable) {
                 debugLog.write("ERROR", "Translation session failed", error)
                 finishPendingSegment()
@@ -297,30 +307,37 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         snapshot: TranslationUiState,
         capture: TurnCapture?,
     ): List<QwenRealtimeSession> {
-        var lastError: Throwable? = null
-        repeat(3) { index ->
-            val attempt = index + 1
+        var attempt = 0
+        while (true) {
+            attempt += 1
             val sessions = createSessions(snapshot, capture)
             try {
                 debugLog.write(
                     "INFO",
-                    "Connecting ${snapshot.settings.translationMode.name} with ${sessions.size} stream(s), attempt $attempt/3",
+                    "Connecting ${snapshot.settings.translationMode.name} with ${sessions.size} stream(s), attempt $attempt",
                 )
                 coroutineScope { sessions.map { async { it.connect() } }.awaitAll() }
                 debugLog.write("INFO", "Qwen session(s) connected")
                 return sessions
             } catch (error: Throwable) {
-                lastError = error
                 sessions.forEach(QwenRealtimeSession::close)
-                if (attempt < 3) {
-                    mutableState.update {
-                        it.copy(error = "Could not connect · retrying ${attempt + 1}/3…")
-                    }
-                    delay(400L * attempt)
+                if (isNonRetriableConnectionError(error)) throw error
+                mutableState.update {
+                    val locallySaved = it.phase == SessionPhase.Queued
+                    it.copy(
+                        error = if (locallySaved) "Recording saved locally · reconnecting automatically…"
+                        else "Recording locally · reconnecting automatically…",
+                    )
                 }
+                val retryDelay = (500L * attempt).coerceAtMost(5_000L)
+                kotlinx.coroutines.withTimeoutOrNull(retryDelay) { retrySignal.receive() }
             }
         }
-        throw lastError ?: IOException("Could not connect")
+    }
+
+    private fun isNonRetriableConnectionError(error: Throwable): Boolean {
+        val message = generateSequence(error) { it.cause }.joinToString(" ") { it.message.orEmpty() }.lowercase()
+        return listOf("unauthorized", "invalid_api_key", "invalid api key", "401", "403", "workspace id").any(message::contains)
     }
 
     private fun createSessions(
@@ -522,7 +539,19 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         if (phase != SessionPhase.Connecting && phase != SessionPhase.Listening) return
         microphone.stop()
         audioChannel?.close()
-        mutableState.update { it.copy(phase = SessionPhase.Sending) }
+        mutableState.update {
+            if (phase == SessionPhase.Connecting) {
+                it.copy(phase = SessionPhase.Queued, error = "Recording saved locally · waiting to send…")
+            } else it.copy(phase = SessionPhase.Sending)
+        }
+    }
+
+    fun cancelPendingTranslation() {
+        if (state.value.phase !in setOf(SessionPhase.Connecting, SessionPhase.Queued)) return
+        debugLog.write("INFO", "User cancelled pending local recording")
+        microphone.stop()
+        audioChannel?.close()
+        sessionJob?.cancel()
     }
 
     fun testConnection(settings: AppSettings = state.value.settings) {
@@ -557,6 +586,11 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun forceRetry() {
         debugLog.write("INFO", "User forced connection retry")
         networkMonitor.refreshNow()
+        if (state.value.phase in setOf(SessionPhase.Connecting, SessionPhase.Queued)) {
+            mutableState.update { it.copy(error = "Retrying Qwen now…") }
+            retrySignal.trySend(Unit)
+            return
+        }
         testConnection()
     }
 

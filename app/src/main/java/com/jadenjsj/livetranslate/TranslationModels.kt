@@ -147,6 +147,7 @@ enum class SessionPhase {
     Idle,
     Testing,
     Connecting,
+    Queued,
     Listening,
     Sending,
     Translating,
