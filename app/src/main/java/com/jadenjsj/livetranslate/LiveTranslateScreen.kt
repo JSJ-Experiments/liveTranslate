@@ -1,15 +1,22 @@
 package com.jadenjsj.livetranslate
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,14 +25,16 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.weight
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -35,29 +44,30 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -77,45 +87,32 @@ fun LiveTranslateScreen(
     onTalkStart: () -> Unit,
     onTalkStop: () -> Unit,
 ) {
-    Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        containerColor = MaterialTheme.colorScheme.background,
-    ) { innerPadding ->
+    val background = MaterialTheme.colorScheme.background
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f),
+                        background,
+                        background,
+                    ),
+                ),
+            ),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .padding(horizontal = 18.dp),
         ) {
-            Header(
+            Header(state, onOpenSettings, onClear)
+            DirectionPicker(state.direction, !state.isActive, onDirectionChange)
+            Conversation(
                 state = state,
-                onOpenSettings = onOpenSettings,
-                onClear = onClear,
-            )
-            ConnectionBanner(state)
-            Spacer(Modifier.height(14.dp))
-            DirectionPicker(
-                selected = state.direction,
-                enabled = !state.isActive,
-                onSelected = onDirectionChange,
-            )
-            Spacer(Modifier.height(14.dp))
-            TranscriptCard(
-                modifier = Modifier.weight(0.72f),
-                label = state.direction.sourceLabel,
-                text = state.sourceText,
-                placeholder = "What you say appears here",
-                emphasized = false,
-            )
-            Spacer(Modifier.height(10.dp))
-            TranscriptCard(
                 modifier = Modifier.weight(1f),
-                label = state.direction.targetLabel,
-                text = state.translationText,
-                placeholder = "Translation appears here",
-                emphasized = true,
             )
             PushToTalk(
                 phase = state.phase,
@@ -143,23 +140,19 @@ private fun Header(state: TranslationUiState, onOpenSettings: () -> Unit, onClea
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 12.dp, bottom = 10.dp),
+            .padding(top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Text(
                 text = "Live Translate",
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
             )
-            Text(
-                text = "Qwen 3.5 realtime",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            ConnectionStatus(state)
         }
-        IconButton(enabled = !state.isActive, onClick = onClear) {
-            Icon(painterResource(R.drawable.ic_delete), "Clear transcripts")
+        IconButton(enabled = !state.isActive && state.turns.isNotEmpty(), onClick = onClear) {
+            Icon(painterResource(R.drawable.ic_delete), "Clear conversation")
         }
         IconButton(enabled = state.phase != SessionPhase.Listening, onClick = onOpenSettings) {
             Icon(painterResource(R.drawable.ic_settings), "Settings")
@@ -168,46 +161,37 @@ private fun Header(state: TranslationUiState, onOpenSettings: () -> Unit, onClea
 }
 
 @Composable
-private fun ConnectionBanner(state: TranslationUiState) {
-    val (label, detail) = when (state.phase) {
-        SessionPhase.Idle -> "Not connected" to if (state.settings.isComplete) "Hold the button to connect" else "Finish setup to begin"
-        SessionPhase.Testing -> "Testing connection" to "Authenticating with Qwen"
-        SessionPhase.Connecting -> "Connecting" to "Audio is buffered on this device"
-        SessionPhase.Listening -> "Connected · live" to "Audio is streaming to Qwen"
-        SessionPhase.Sending -> "Sending" to "Uploading the final audio buffer"
-        SessionPhase.Translating -> "Connected · translating" to "Waiting for the final response"
-        SessionPhase.Error -> "Disconnected" to (state.error ?: "Connection failed")
+private fun ConnectionStatus(state: TranslationUiState) {
+    val label = when (state.phase) {
+        SessionPhase.Idle -> if (state.settings.isComplete) "Ready · disconnected" else "Setup required"
+        SessionPhase.Testing -> "Testing connection"
+        SessionPhase.Connecting -> "Connecting · audio stays local"
+        SessionPhase.Listening -> "Connected · sending audio"
+        SessionPhase.Sending -> "Sending final audio"
+        SessionPhase.Translating -> "Connected · translating"
+        SessionPhase.Error -> state.error ?: "Disconnected"
     }
     val dot = when (state.phase) {
-        SessionPhase.Listening, SessionPhase.Translating -> Color(0xFF45D483)
-        SessionPhase.Connecting, SessionPhase.Sending, SessionPhase.Testing -> Color(0xFFFFC857)
+        SessionPhase.Listening, SessionPhase.Translating -> Color(0xFF2DBE72)
+        SessionPhase.Connecting, SessionPhase.Sending, SessionPhase.Testing -> Color(0xFFF4A62A)
         SessionPhase.Error -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.outline
     }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(20.dp),
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 15.dp, vertical = 11.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(11.dp),
-        ) {
-            Box(Modifier.size(9.dp).background(dot, CircleShape))
-            Column(Modifier.weight(1f)) {
-                Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                Text(
-                    detail,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (state.isActive && state.phase != SessionPhase.Listening) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-            }
+        Box(Modifier.size(7.dp).background(dot, CircleShape))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (state.phase == SessionPhase.Error) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (state.isActive && state.phase != SessionPhase.Listening) {
+            CircularProgressIndicator(Modifier.size(11.dp), strokeWidth = 1.5.dp)
         }
     }
 }
@@ -221,9 +205,9 @@ private fun DirectionPicker(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(18.dp))
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.72f), RoundedCornerShape(15.dp))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         TranslationDirection.entries.forEach { direction ->
             val active = direction == selected
@@ -231,16 +215,19 @@ private fun DirectionPicker(
                 modifier = Modifier.weight(1f),
                 onClick = { onSelected(direction) },
                 enabled = enabled,
-                color = if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                shape = RoundedCornerShape(14.dp),
+                color = if (active) MaterialTheme.colorScheme.surface else Color.Transparent,
+                shape = RoundedCornerShape(12.dp),
+                tonalElevation = if (active) 2.dp else 0.dp,
             ) {
                 Text(
                     text = direction.shortLabel,
-                    modifier = Modifier.padding(vertical = 11.dp),
+                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp),
                     textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelMedium,
                     fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (active) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
                 )
             }
         }
@@ -248,45 +235,127 @@ private fun DirectionPicker(
 }
 
 @Composable
-private fun TranscriptCard(
-    modifier: Modifier,
-    label: String,
-    text: String,
-    placeholder: String,
-    emphasized: Boolean,
-) {
-    Card(
+private fun Conversation(state: TranslationUiState, modifier: Modifier = Modifier) {
+    val listState = rememberLazyListState()
+    val hasLiveTurn = state.sourceText.isNotBlank() || state.translationText.isNotBlank() || state.isActive
+    val itemCount = state.turns.size + if (hasLiveTurn) 1 else 0
+
+    LaunchedEffect(itemCount, state.sourceText, state.translationText) {
+        if (itemCount > 0) listState.scrollToItem(itemCount - 1)
+    }
+
+    if (itemCount == 0) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "Hold the mic and speak",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    if (state.direction == TranslationDirection.Auto) {
+                        "Chinese and English are detected automatically"
+                    } else {
+                        state.direction.shortLabel
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        return
+    }
+
+    LazyColumn(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (emphasized) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f)
-            else MaterialTheme.colorScheme.surfaceContainer,
-        ),
+        state = listState,
+        contentPadding = PaddingValues(top = 22.dp, bottom = 12.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(19.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = label.uppercase(),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = if (emphasized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = text.ifBlank { placeholder },
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState()),
-                style = if (emphasized) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
-                fontWeight = if (text.isBlank()) FontWeight.Normal else FontWeight.Medium,
-                color = if (text.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
-                else MaterialTheme.colorScheme.onSurface,
+        items(state.turns, key = TranslationTurn::id) { turn ->
+            TranscriptTurn(
+                sourceText = turn.sourceText,
+                translationText = turn.translationText,
+                sourceLanguage = turn.sourceLanguage,
+                targetLanguage = turn.targetLanguage,
+                live = false,
             )
         }
+        if (hasLiveTurn) {
+            item(key = "live") {
+                TranscriptTurn(
+                    sourceText = state.sourceText,
+                    translationText = state.translationText,
+                    sourceLanguage = state.detectedSourceLanguage ?: state.direction.sourceLanguage,
+                    targetLanguage = state.activeTargetLanguage,
+                    live = state.isActive,
+                )
+            }
+        }
     }
+}
+
+@Composable
+private fun TranscriptTurn(
+    sourceText: String,
+    translationText: String,
+    sourceLanguage: String?,
+    targetLanguage: String,
+    live: Boolean,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 20.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "${languageLabel(sourceLanguage)} · ORIGINAL",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (live) {
+                Spacer(Modifier.size(7.dp))
+                Box(Modifier.size(6.dp).background(Color(0xFF2DBE72), CircleShape))
+            }
+        }
+        Text(
+            text = sourceText.ifBlank { if (live) "Listening…" else "—" },
+            modifier = Modifier.padding(top = 4.dp),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Medium,
+            fontStyle = if (sourceText.isBlank()) FontStyle.Italic else FontStyle.Normal,
+            color = if (sourceText.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
+            else MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(11.dp))
+        Text(
+            text = "${languageLabel(targetLanguage)} · TRANSLATION",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        if (translationText.isNotBlank()) {
+            Text(
+                text = translationText,
+                modifier = Modifier.padding(top = 4.dp),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        HorizontalDivider(
+            modifier = Modifier.padding(top = 20.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+        )
+    }
+}
+
+private fun languageLabel(code: String?): String = when {
+    code == null -> "AUTO"
+    code == "zh" || code.startsWith("zh-") -> "中文"
+    code == "en" || code.startsWith("en-") -> "ENGLISH"
+    else -> code.uppercase()
 }
 
 @Composable
@@ -296,60 +365,94 @@ private fun PushToTalk(
     onStart: () -> Unit,
     onStop: () -> Unit,
 ) {
-    val pressed = phase == SessionPhase.Connecting || phase == SessionPhase.Listening
-    val scale by animateFloatAsState(if (pressed) 1.08f else 1f, label = "mic scale")
+    val active = phase == SessionPhase.Connecting || phase == SessionPhase.Listening
+    val scale by animateFloatAsState(if (active) 1.07f else 1f, label = "mic scale")
     val color by animateColorAsState(
-        if (pressed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        if (active) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
         label = "mic color",
     )
+    val infiniteTransition = rememberInfiniteTransition(label = "mic glow")
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0.88f,
+        targetValue = 1.25f,
+        animationSpec = infiniteRepeatable(tween(850), RepeatMode.Reverse),
+        label = "mic pulse",
+    )
+    val currentStart by rememberUpdatedState(onStart)
+    val currentStop by rememberUpdatedState(onStop)
+    val canStart by rememberUpdatedState(ready && (phase == SessionPhase.Idle || phase == SessionPhase.Error))
+
     val text = when (phase) {
-        SessionPhase.Connecting -> "KEEP HOLDING · CONNECTING"
+        SessionPhase.Connecting -> "CONNECTING · KEEP HOLDING"
         SessionPhase.Listening -> "LISTENING · RELEASE TO SEND"
-        SessionPhase.Sending -> "SENDING AUDIO…"
+        SessionPhase.Sending -> "SENDING…"
         SessionPhase.Translating -> "TRANSLATING…"
+        SessionPhase.Testing -> "TESTING CONNECTION…"
         else -> if (ready) "HOLD TO TALK" else "SET UP CONNECTION"
     }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 15.dp, bottom = 14.dp),
+            .padding(top = 5.dp, bottom = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Box(
             modifier = Modifier
-                .scale(scale)
-                .size(78.dp)
-                .background(color, CircleShape)
+                .size(84.dp)
                 .semantics {
                     role = Role.Button
-                    contentDescription = "Push to talk. Hold while speaking."
+                    contentDescription = "Push to talk. Hold while speaking, then release to send."
                 }
-                .pointerInput(phase, ready) {
-                    detectTapGestures(
-                        onPress = {
-                            if (phase == SessionPhase.Idle || phase == SessionPhase.Error) {
-                                onStart()
-                                tryAwaitRelease()
-                                onStop()
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        if (canStart) {
+                            currentStart()
+                            try {
+                                waitForUpOrCancellation()
+                            } finally {
+                                currentStop()
                             }
-                        },
-                    )
+                        } else {
+                            waitForUpOrCancellation()
+                        }
+                    }
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_mic),
-                contentDescription = null,
-                modifier = Modifier.size(34.dp),
-                tint = MaterialTheme.colorScheme.onPrimary,
-            )
+            if (active) {
+                Box(
+                    Modifier
+                        .size(76.dp)
+                        .graphicsLayer {
+                            scaleX = pulse
+                            scaleY = pulse
+                            alpha = 0.2f
+                        }
+                        .background(color, CircleShape),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .scale(scale)
+                    .size(66.dp)
+                    .background(color, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_mic),
+                    contentDescription = null,
+                    modifier = Modifier.size(29.dp),
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                )
+            }
         }
         Text(
             text = text,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
-            color = if (pressed) color else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (active) color else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -397,12 +500,12 @@ private fun SettingsSheet(
         ) {
             Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(
-                "Credentials stay in this app's private storage and are sent only to Alibaba Cloud. A client-side key is fine for a personal MVP, not a public release.",
+                "The API key is AES-GCM encrypted with Android Keystore and sent only to Alibaba Cloud. A client-side key is suitable for a personal build, not broad distribution.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            SectionLabel("MODEL STUDIO")
+            SectionLabel("MODEL STUDIO · DASHSCOPE")
             OutlinedTextField(
                 value = apiKey,
                 onValueChange = { apiKey = it },
@@ -434,11 +537,11 @@ private fun SettingsSheet(
             ReadOnlySetting(
                 "Format",
                 "PCM 16-bit mono",
-                "The official reference client uses PCM. Opus is smaller, but Alibaba does not document the required packet container, so it is not exposed as an unsafe option.",
+                "Qwen also accepts Opus. This build keeps PCM because Android's raw Opus packet framing needs a separate interoperability pass before it is safe to expose.",
             )
             Text("Quality / sample rate", style = MaterialTheme.typography.labelLarge)
             ChoiceRow(
-                choices = listOf("8000" to "8 kHz · data saver", "16000" to "16 kHz · best"),
+                choices = listOf("8000" to "8 kHz · saver", "16000" to "16 kHz · best"),
                 selected = sampleRate.toString(),
                 onSelect = { sampleRate = it.toInt() },
             )
@@ -449,13 +552,18 @@ private fun SettingsSheet(
                 onSelect = { chunkMilliseconds = it.toInt() },
             )
             Text(
-                "Shorter packets can feel more responsive; longer packets use slightly less overhead.",
+                "Shorter packets reduce streaming latency; longer packets use slightly less overhead.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             HorizontalDivider()
             SectionLabel("TRANSLATION")
+            ReadOnlySetting(
+                "Automatic direction",
+                "Source language auto-detection",
+                "In Auto mode, Qwen detects the source and the app switches the target between Chinese and English before the push-to-talk turn is committed.",
+            )
             OutlinedTextField(
                 value = hotwords,
                 onValueChange = { hotwords = it },
@@ -465,7 +573,7 @@ private fun SettingsSheet(
                 minLines = 2,
                 supportingText = { Text("One source=translation pair per line") },
             )
-            ReadOnlySetting("Output", "Text only", "Speech output is intentionally deferred from this first reliable build.")
+            ReadOnlySetting("Output", "Text only", "Spoken output is deferred until the translation path is reliable.")
 
             HorizontalDivider()
             Button(
@@ -483,7 +591,8 @@ private fun SettingsSheet(
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (it.startsWith("Connected")) Color(0xFF3BBF76) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (it.startsWith("Connected")) Color(0xFF2DBE72)
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Button(

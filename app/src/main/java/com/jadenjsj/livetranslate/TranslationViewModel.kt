@@ -52,7 +52,15 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     fun clearTranscript() {
         if (!state.value.isActive) {
-            mutableState.update { it.copy(sourceText = "", translationText = "", error = null) }
+            mutableState.update {
+                it.copy(
+                    turns = emptyList(),
+                    sourceText = "",
+                    translationText = "",
+                    detectedSourceLanguage = null,
+                    error = null,
+                )
+            }
         }
     }
 
@@ -77,6 +85,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 phase = SessionPhase.Connecting,
                 sourceText = "",
                 translationText = "",
+                detectedSourceLanguage = null,
+                activeTargetLanguage = snapshot.direction.targetLanguage,
                 error = null,
             )
         }
@@ -115,7 +125,27 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                     session.commit()
                 }
                 session.awaitFinished()
-                mutableState.update { it.copy(phase = SessionPhase.Idle, error = null) }
+                mutableState.update { current ->
+                    val completed = if (current.sourceText.isNotBlank() || current.translationText.isNotBlank()) {
+                        current.turns + TranslationTurn(
+                            id = System.nanoTime(),
+                            sourceText = current.sourceText,
+                            translationText = current.translationText,
+                            sourceLanguage = current.detectedSourceLanguage ?: snapshot.direction.sourceLanguage,
+                            targetLanguage = current.activeTargetLanguage,
+                        )
+                    } else {
+                        current.turns
+                    }
+                    current.copy(
+                        turns = completed,
+                        sourceText = "",
+                        translationText = "",
+                        detectedSourceLanguage = null,
+                        phase = SessionPhase.Idle,
+                        error = null,
+                    )
+                }
             } catch (error: Throwable) {
                 showError(error)
             } finally {
@@ -166,13 +196,27 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     private fun handleEvent(event: QwenServerEvent) {
         mutableState.update { current ->
             when (event) {
-                is QwenServerEvent.SourcePreview -> current.copy(sourceText = event.text)
-                is QwenServerEvent.SourceDone -> current.copy(sourceText = event.text)
+                is QwenServerEvent.SourcePreview -> current.withSource(event.text, event.language)
+                is QwenServerEvent.SourceDone -> current.withSource(event.text, event.language)
                 is QwenServerEvent.TranslationPreview -> current.copy(translationText = event.text)
                 is QwenServerEvent.TranslationDone -> current.copy(translationText = event.text)
                 else -> current
             }
         }
+    }
+
+    private fun TranslationUiState.withSource(text: String, language: String?): TranslationUiState {
+        val detected = language?.lowercase() ?: detectedSourceLanguage
+        val target = if (direction == TranslationDirection.Auto && detected != null) {
+            if (detected == "zh" || detected.startsWith("zh-")) "en" else "zh"
+        } else {
+            direction.targetLanguage
+        }
+        return copy(
+            sourceText = text,
+            detectedSourceLanguage = detected,
+            activeTargetLanguage = target,
+        )
     }
 
     private fun showError(error: Throwable) {

@@ -44,11 +44,19 @@ class QwenProtocolTest {
     }
 
     @Test
+    fun `automatic direction lets Qwen detect source and can update target`() {
+        val session = JSONObject(sessionUpdate(TranslationDirection.Auto, targetLanguage = "en"))
+            .getJSONObject("session")
+        assertFalse(session.getJSONObject("input_audio_transcription").has("language"))
+        assertEquals("en", session.getJSONObject("translation").getString("language"))
+    }
+
+    @Test
     fun `parses source and translation previews using confirmed plus tentative text`() {
         assertEquals(
-            QwenServerEvent.SourcePreview("How are you?"),
+            QwenServerEvent.SourcePreview("How are you?", "en"),
             parseServerEvent(
-                """{"type":"conversation.item.input_audio_transcription.text","text":"How ","stash":"are you?"}""",
+                """{"type":"conversation.item.input_audio_transcription.text","text":"How ","stash":"are you?","language":"en"}""",
             ),
         )
         assertEquals(
@@ -60,8 +68,8 @@ class QwenProtocolTest {
     @Test
     fun `parses final and API error events`() {
         assertEquals(
-            QwenServerEvent.SourceDone("Hello"),
-            parseServerEvent("""{"type":"conversation.item.input_audio_transcription.completed","transcript":"Hello"}"""),
+            QwenServerEvent.SourceDone("Hello", "en"),
+            parseServerEvent("""{"type":"conversation.item.input_audio_transcription.completed","transcript":"Hello","language":"en"}"""),
         )
         val error = parseServerEvent(
             """{"type":"error","error":{"code":"invalid_api_key","message":"Unauthorized"}}""",

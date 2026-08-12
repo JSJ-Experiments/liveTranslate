@@ -40,7 +40,7 @@ jobs:
         run: gradle --no-daemon :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
       - name: Create release files
         env:
-          VERSION: "0.1.1"
+          VERSION: "0.2.0"
         run: |
           mkdir -p release-dist
           apk="release-dist/LiveTranslate-v${VERSION}-arm64-v8a.apk"
@@ -59,7 +59,7 @@ jobs:
               app: "Live Translate",
               packageName: "com.jadenjsj.livetranslate",
               versionName: $version,
-              versionCode: 2,
+              versionCode: 3,
               buildType: "release",
               minSdk: 26,
               targetSdk: 36,
@@ -72,11 +72,11 @@ jobs:
               sourceCommit: $commit,
               buildRun: $run,
               model: "qwen3.5-livetranslate-flash-realtime",
-              notes: "Pre-release. Text-only, push-to-talk translation."
+              notes: "Pre-release. Compact conversation history, reliable push-to-talk, mic activity glow, and automatic Chinese/English direction."
             }' > "$metadata"
       - uses: actions/upload-artifact@v4
         with:
-          name: LiveTranslate-v0.1.1-arm64-v8a
+          name: LiveTranslate-v0.2.0-arm64-v8a
           path: release-dist/
           if-no-files-found: error
           retention-days: 14

@@ -5,6 +5,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -20,12 +21,15 @@ internal class QwenRealtimeSession(
 ) : Closeable {
     private val connected = CompletableDeferred<Unit>()
     private val finished = CompletableDeferred<Unit>()
+    private val detectedLanguage = CompletableDeferred<String>()
     private val client = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
         .build()
     private var webSocket: WebSocket? = null
     @Volatile private var inputCommitted = false
     @Volatile private var finishSent = false
+    @Volatile private var currentTargetLanguage = direction.targetLanguage
+    @Volatile private var pendingTranslationUpdate: CompletableDeferred<Unit>? = null
 
     suspend fun connect() = withContext(Dispatchers.IO) {
         val request = Request.Builder()
@@ -46,7 +50,13 @@ internal class QwenRealtimeSession(
         check(webSocket?.send(appendAudio(audio)) == true) { "Audio connection was lost" }
     }
 
-    fun commit() {
+    suspend fun commit() {
+        if (direction == TranslationDirection.Auto) {
+            withTimeoutOrNull(700) { detectedLanguage.await() }
+            pendingTranslationUpdate?.let { update ->
+                withTimeoutOrNull(1_000) { update.await() }
+            }
+        }
         inputCommitted = true
         check(webSocket?.send(simpleEvent("input_audio_buffer.commit")) == true) {
             "Could not submit audio"
@@ -79,14 +89,40 @@ internal class QwenRealtimeSession(
 
         override fun onMessage(webSocket: WebSocket, text: String) {
             when (val event = parseServerEvent(text)) {
-                QwenServerEvent.SessionUpdated -> connected.complete(Unit)
+                QwenServerEvent.SessionUpdated -> {
+                    if (!connected.isCompleted) connected.complete(Unit)
+                    else pendingTranslationUpdate?.complete(Unit)
+                }
                 QwenServerEvent.ResponseDone -> if (inputCommitted && !finishSent) {
                     finishSent = true
                     webSocket.send(simpleEvent("session.finish"))
                 }
                 QwenServerEvent.SessionFinished -> finished.complete(Unit)
                 is QwenServerEvent.Error -> fail(IllegalStateException(event.message))
-                else -> onEvent(event)
+                else -> {
+                    adaptAutoDirection(event, webSocket)
+                    onEvent(event)
+                }
+            }
+        }
+
+        private fun adaptAutoDirection(event: QwenServerEvent, webSocket: WebSocket) {
+            if (direction != TranslationDirection.Auto || inputCommitted) return
+            val language = when (event) {
+                is QwenServerEvent.SourcePreview -> event.language
+                is QwenServerEvent.SourceDone -> event.language
+                else -> null
+            }?.lowercase()?.takeIf(String::isNotBlank) ?: return
+
+            detectedLanguage.complete(language)
+            val target = if (language == "zh" || language.startsWith("zh-")) "en" else "zh"
+            if (target == currentTargetLanguage) return
+
+            currentTargetLanguage = target
+            val update = CompletableDeferred<Unit>()
+            pendingTranslationUpdate = update
+            if (!webSocket.send(sessionUpdate(direction, settings, target))) {
+                update.completeExceptionally(IllegalStateException("Could not update automatic translation direction"))
             }
         }
 

@@ -11,8 +11,12 @@ internal fun buildQwenUrl(workspaceId: String, region: Region): String {
         "/api-ws/v1/realtime?model=$MODEL"
 }
 
-internal fun sessionUpdate(direction: TranslationDirection, settings: AppSettings = AppSettings()): String = event("session.update") {
-    val translation = JSONObject().put("language", direction.targetLanguage)
+internal fun sessionUpdate(
+    direction: TranslationDirection,
+    settings: AppSettings = AppSettings(),
+    targetLanguage: String = direction.targetLanguage,
+): String = event("session.update") {
+    val translation = JSONObject().put("language", targetLanguage)
     parseHotwords(settings.hotwords).takeIf { it.length() > 0 }?.let { phrases ->
         translation.put("corpus", JSONObject().put("phrases", phrases))
     }
@@ -22,12 +26,10 @@ internal fun sessionUpdate(direction: TranslationDirection, settings: AppSetting
             .put("modalities", jsonArrayOf("text"))
             .put("sample_rate", settings.sampleRate)
             .put("input_audio_format", "pcm")
-            .put(
-                "input_audio_transcription",
-                JSONObject()
-                    .put("model", "qwen3-asr-flash-realtime")
-                    .put("language", direction.sourceLanguage),
-            )
+            .put("input_audio_transcription", JSONObject().apply {
+                put("model", "qwen3-asr-flash-realtime")
+                direction.sourceLanguage?.let { put("language", it) }
+            })
             .put("turn_detection", JSONObject.NULL)
             .put("translation", translation),
     )
@@ -43,8 +45,8 @@ internal sealed interface QwenServerEvent {
     data object SessionUpdated : QwenServerEvent
     data object ResponseDone : QwenServerEvent
     data object SessionFinished : QwenServerEvent
-    data class SourcePreview(val text: String) : QwenServerEvent
-    data class SourceDone(val text: String) : QwenServerEvent
+    data class SourcePreview(val text: String, val language: String? = null) : QwenServerEvent
+    data class SourceDone(val text: String, val language: String? = null) : QwenServerEvent
     data class TranslationPreview(val text: String) : QwenServerEvent
     data class TranslationDone(val text: String) : QwenServerEvent
     data class Error(val message: String) : QwenServerEvent
@@ -60,9 +62,15 @@ internal fun parseServerEvent(raw: String): QwenServerEvent {
         "session.finished" -> QwenServerEvent.SessionFinished
         "response.done" -> QwenServerEvent.ResponseDone
         "conversation.item.input_audio_transcription.text" ->
-            QwenServerEvent.SourcePreview(json.optString("text") + json.optString("stash"))
+            QwenServerEvent.SourcePreview(
+                json.optString("text") + json.optString("stash"),
+                json.optString("language").takeIf(String::isNotBlank),
+            )
         "conversation.item.input_audio_transcription.completed" ->
-            QwenServerEvent.SourceDone(json.optString("transcript"))
+            QwenServerEvent.SourceDone(
+                json.optString("transcript"),
+                json.optString("language").takeIf(String::isNotBlank),
+            )
         "response.text.text" ->
             QwenServerEvent.TranslationPreview(json.optString("text") + json.optString("stash"))
         "response.text.done" -> QwenServerEvent.TranslationDone(json.optString("text"))

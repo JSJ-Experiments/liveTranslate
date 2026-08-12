@@ -5,8 +5,9 @@ A small, native push-to-talk translator using Alibaba Cloud's
 
 ## MVP features
 
-- English → Chinese and Chinese → English.
-- Live source transcript and tentative/final translation text.
+- Automatic Chinese ↔ English direction, plus explicit manual directions.
+- Compact, scrollable conversation history with live source and translation text.
+- True hold-to-talk interaction with visible microphone glow and release-to-send.
 - Explicit connection states: disconnected, connecting, live, sending, and translating.
 - On-device connection test with authenticated WebSocket handshake latency.
 - In-app settings for API key, workspace, Beijing/Singapore region, 8/16 kHz
@@ -18,13 +19,13 @@ The app records immediately when push-to-talk is held. While the WebSocket is
 connecting, audio is buffered locally. Once authenticated, it is streamed to
 Qwen; releasing the button visibly enters the sending/finalizing states.
 
-## Why PCM instead of Opus?
+## Why PCM instead of Opus for now?
 
-The API advertises Opus, but its realtime documentation does not specify the
-required packet/container framing. The official browser demo currently streams
-16 kHz mono PCM. This MVP therefore favors the known-good PCM16 path instead of
-shipping an untestable codec switch. At 16 kHz it sends about 32 KB/s before
-Base64/WebSocket overhead; the 8 kHz data-saver option halves that.
+The current API documents Opus support, but does not specify the raw packet or
+container framing expected from Android's encoder. This build keeps the
+known-good PCM16 path instead of exposing an interoperability gamble. At 16 kHz
+it sends about 32 KB/s before Base64/WebSocket overhead; the 8 kHz data-saver
+option halves that.
 
 ## Setup
 
@@ -32,7 +33,13 @@ Base64/WebSocket overhead; the 8 kHz data-saver option halves that.
 2. Open **Settings**.
 3. Paste a Model Studio API key and its matching workspace ID.
 4. Select the matching region and tap **Test connection**.
-5. Save, choose a direction, then hold the microphone button while speaking.
+5. Save, leave direction on **Auto** (or select a manual direction), then hold
+   the microphone button while speaking and release to send.
+
+Qwen can auto-detect the source language but still requires one target language.
+In Auto mode the app listens for Qwen's detected source code while audio streams,
+updates the target to the other side of the Chinese/English pair, then commits
+the push-to-talk turn. Manual direction buttons remain available as a fallback.
 
 API keys are region-bound. The stored key is encrypted at rest with Android
 Keystore and backup is disabled. This protects it from ordinary app-to-app

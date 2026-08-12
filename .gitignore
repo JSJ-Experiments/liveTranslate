@@ -12,5 +12,6 @@ local.properties
 *.aab
 release-dist/
 prerelease/
+prerelease-v*/
 .idea/
 *.iml

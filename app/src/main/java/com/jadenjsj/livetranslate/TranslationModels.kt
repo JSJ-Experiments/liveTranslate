@@ -1,12 +1,19 @@
 package com.jadenjsj.livetranslate
 
 enum class TranslationDirection(
-    val sourceLanguage: String,
+    val sourceLanguage: String?,
     val targetLanguage: String,
     val sourceLabel: String,
     val targetLabel: String,
     val shortLabel: String,
 ) {
+    Auto(
+        sourceLanguage = null,
+        targetLanguage = "zh",
+        sourceLabel = "Auto · 原文",
+        targetLabel = "Translation · 译文",
+        shortLabel = "AUTO",
+    ),
     EnglishToChinese(
         sourceLanguage = "en",
         targetLanguage = "zh",
@@ -22,6 +29,14 @@ enum class TranslationDirection(
         shortLabel = "中文  →  EN",
     ),
 }
+
+data class TranslationTurn(
+    val id: Long,
+    val sourceText: String,
+    val translationText: String,
+    val sourceLanguage: String?,
+    val targetLanguage: String,
+)
 
 enum class Region(val hostPart: String, val label: String) {
     Beijing("cn-beijing", "Beijing · 北京"),
@@ -51,9 +66,12 @@ enum class SessionPhase {
 
 data class TranslationUiState(
     val settings: AppSettings = AppSettings(),
-    val direction: TranslationDirection = TranslationDirection.EnglishToChinese,
+    val direction: TranslationDirection = TranslationDirection.Auto,
+    val turns: List<TranslationTurn> = emptyList(),
     val sourceText: String = "",
     val translationText: String = "",
+    val detectedSourceLanguage: String? = null,
+    val activeTargetLanguage: String = "zh",
     val phase: SessionPhase = SessionPhase.Idle,
     val error: String? = null,
     val settingsOpen: Boolean = false,
