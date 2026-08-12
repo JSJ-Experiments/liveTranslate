@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -705,7 +704,7 @@ private fun LanguagePicker(label: String, selectedCode: String, onSelected: (Str
             label = { Text(label) },
             readOnly = true,
         )
-        Box(Modifier.matchParentSize().clickable { expanded = true })
+        Box(Modifier.fillMaxSize().clickable { expanded = true })
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             supportedLanguages.forEach { language ->
                 DropdownMenuItem(
