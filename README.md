@@ -52,7 +52,8 @@ option halves that.
 Qwen can auto-detect the source language but still requires one target language.
 The default English/Chinese mode therefore sends the same audio to two Qwen
 sessions, one targeting English and one Chinese, and asks each to skip audio
-already in its target language. The cheaper auto-source mode uses one fixed,
+already in its target language. Each stream keeps its own source transcript so
+asynchronous results cannot be attached to the wrong sentence. The cheaper auto-source mode uses one fixed,
 user-selectable target. Manual directions remain available as a fallback.
 
 API keys are region-bound. The stored key is encrypted at rest with Android

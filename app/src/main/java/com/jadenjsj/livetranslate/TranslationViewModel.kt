@@ -330,8 +330,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         val settings = snapshot.settings
         return when (settings.translationMode) {
             TranslationMode.DualEnglishChinese -> listOf(
-                createSession(settings, "zh", transcribeSource = true, skipSame = true, capture = capture),
-                createSession(settings, "en", transcribeSource = false, skipSame = true, capture = capture),
+                createSession(settings, "zh", transcribeSource = true, publishSource = true, skipSame = true, capture = capture),
+                createSession(settings, "en", transcribeSource = true, publishSource = false, skipSame = true, capture = capture),
             )
             TranslationMode.DetectedPair -> listOf(
                 createSession(
@@ -370,10 +370,13 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         targetLanguage: String,
         sourceLanguage: String? = null,
         transcribeSource: Boolean,
+        publishSource: Boolean = true,
         skipSame: Boolean,
         capture: TurnCapture?,
     ): QwenRealtimeSession {
         var streamTranslation = ""
+        var streamSource = ""
+        var streamSourceLanguage: String? = null
         return QwenRealtimeSession(
             settings = settings,
             direction = TranslationDirection.Auto,
@@ -387,8 +390,16 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             onRawEvent = { raw -> capture?.appendServerEvent(targetLanguage, raw) },
             onEvent = { event ->
                 when (event) {
-                    is QwenServerEvent.SourcePreview -> updateSource(event.text, event.language)
-                    is QwenServerEvent.SourceDone -> updateSource(event.text, event.language)
+                    is QwenServerEvent.SourcePreview -> {
+                        streamSource = event.text
+                        streamSourceLanguage = event.language?.lowercase() ?: streamSourceLanguage
+                        if (publishSource) updateSource(event.text, event.language)
+                    }
+                    is QwenServerEvent.SourceDone -> {
+                        streamSource = event.text
+                        streamSourceLanguage = event.language?.lowercase() ?: streamSourceLanguage
+                        if (publishSource) updateSource(event.text, event.language)
+                    }
                     is QwenServerEvent.TranslationPreview -> {
                         streamTranslation = event.text
                         mutableState.update {
@@ -403,9 +414,18 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                     }
                     QwenServerEvent.ResponseDone -> {
                         if (streamTranslation.isNotBlank()) {
-                            completeSegment(streamTranslation, targetLanguage)
+                            completeSegment(
+                                source = streamSource,
+                                sourceLanguage = streamSourceLanguage,
+                                translation = streamTranslation,
+                                targetLanguage = targetLanguage,
+                            )
                             streamTranslation = ""
+                        } else if (publishSource && streamSource.isNotBlank()) {
+                            clearPreviewFor(streamSource)
                         }
+                        streamSource = ""
+                        streamSourceLanguage = null
                     }
                     else -> Unit
                 }
@@ -423,29 +443,46 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    private fun completeSegment(translation: String, targetLanguage: String) {
+    private fun completeSegment(
+        source: String,
+        sourceLanguage: String?,
+        translation: String,
+        targetLanguage: String,
+    ) {
         mutableState.update { current ->
             if (translation.isBlank()) return@update current
             val segment = TranslationTurn(
                 id = segmentIds.updateAndGet { previous -> maxOf(previous + 1, System.currentTimeMillis()) },
-                sourceText = current.sourceText,
+                sourceText = source.ifBlank { current.sourceText },
                 translationText = translation,
-                sourceLanguage = current.detectedSourceLanguage,
+                sourceLanguage = sourceLanguage ?: current.detectedSourceLanguage,
                 targetLanguage = targetLanguage,
             )
             current.copy(
                 liveTurns = current.liveTurns + segment,
-                sourceText = "",
-                translationText = "",
-                detectedSourceLanguage = null,
+                sourceText = if (current.sourceText == source) "" else current.sourceText,
+                translationText = if (current.translationText == translation) "" else current.translationText,
+                detectedSourceLanguage = if (current.sourceText == source) null else current.detectedSourceLanguage,
             )
+        }
+    }
+
+    private fun clearPreviewFor(source: String) {
+        mutableState.update { current ->
+            if (current.sourceText != source) current
+            else current.copy(sourceText = "", detectedSourceLanguage = null)
         }
     }
 
     private fun finishPendingSegment() {
         val current = state.value
         if (current.translationText.isNotBlank()) {
-            completeSegment(current.translationText, current.activeTargetLanguage)
+            completeSegment(
+                source = current.sourceText,
+                sourceLanguage = current.detectedSourceLanguage,
+                translation = current.translationText,
+                targetLanguage = current.activeTargetLanguage,
+            )
         }
     }
 
