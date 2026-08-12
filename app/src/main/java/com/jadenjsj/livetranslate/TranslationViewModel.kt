@@ -24,6 +24,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     private val microphone = MicrophoneRecorder(application)
     private val history = HistoryRepository(application)
     private val debugLog = DebugLog(application)
+    private val debugExporter = DebugExporter(application)
     private val networkMonitor = NetworkMonitor(application) { online ->
         debugLog.write(if (online) "INFO" else "WARN", if (online) "Network restored" else "Network lost")
     }
@@ -78,6 +79,12 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             mutableState.update { it.copy(turns = emptyList()) }
             viewModelScope.launch(Dispatchers.IO) { history.clear() }
         }
+    }
+
+    fun exportDiagnostics() {
+        runCatching { debugExporter.share() }
+            .onSuccess { debugLog.write("INFO", "Diagnostics export opened") }
+            .onFailure { debugLog.write("ERROR", "Could not export diagnostics", it) }
     }
 
     fun microphonePermissionDenied() {

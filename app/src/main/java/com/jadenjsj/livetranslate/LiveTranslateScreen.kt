@@ -88,6 +88,7 @@ fun LiveTranslateScreen(
     onOpenHistory: () -> Unit,
     onCloseHistory: () -> Unit,
     onClearHistory: () -> Unit,
+    onExportDiagnostics: () -> Unit,
     onPlayTurn: (TranslationTurn) -> Unit,
     onTalkStart: () -> Unit,
     onTalkStop: () -> Unit,
@@ -98,7 +99,7 @@ fun LiveTranslateScreen(
             .background(MaterialTheme.colorScheme.background),
     ) {
         if (state.historyOpen) {
-            HistoryScreen(state, onCloseHistory, onClearHistory, onPlayTurn)
+            HistoryScreen(state, onCloseHistory, onClearHistory, onExportDiagnostics, onPlayTurn)
         } else {
             InterpreterScreen(state, onOpenHistory, onOpenSettings, onTalkStart, onTalkStop)
         }
@@ -337,6 +338,7 @@ private fun HistoryScreen(
     state: TranslationUiState,
     onBack: () -> Unit,
     onClear: () -> Unit,
+    onExport: () -> Unit,
     onPlayTurn: (TranslationTurn) -> Unit,
 ) {
     Column(
@@ -357,6 +359,9 @@ private fun HistoryScreen(
             }
             Text("History", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
+            IconButton(onClick = onExport) {
+                Icon(painterResource(R.drawable.ic_share), "Export diagnostics", tint = MaterialTheme.colorScheme.onSurface)
+            }
             IconButton(onClick = onClear, enabled = state.turns.isNotEmpty()) {
                 Icon(painterResource(R.drawable.ic_delete), "Clear history", tint = MaterialTheme.colorScheme.onSurface)
             }
@@ -661,7 +666,7 @@ private fun SettingsSheet(
             ReadOnlySetting(
                 "Debug log",
                 "files/debug_logs/livetranslate.log",
-                "Readable with Android Studio Device Explorer or: adb exec-out run-as com.jadenjsj.livetranslate cat files/debug_logs/livetranslate.log",
+                "Open History and tap Export to share a ZIP containing this log, raw Qwen events, transcripts, and WAV recordings.",
             )
 
             HorizontalDivider()

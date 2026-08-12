@@ -37,6 +37,7 @@ class MainActivity : ComponentActivity() {
                     onOpenHistory = viewModel::openHistory,
                     onCloseHistory = viewModel::closeHistory,
                     onClearHistory = viewModel::clearHistory,
+                    onExportDiagnostics = viewModel::exportDiagnostics,
                     onPlayTurn = viewModel::playRecording,
                     onTalkStart = {
                         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
