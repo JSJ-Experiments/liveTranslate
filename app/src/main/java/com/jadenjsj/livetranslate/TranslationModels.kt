@@ -1,4 +1,4 @@
-package dev.jsj.livetranslate
+package com.jadenjsj.livetranslate
 
 enum class TranslationDirection(
     val sourceLanguage: String,

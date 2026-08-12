@@ -25,11 +25,58 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "9.5.0"
+      - name: Restore release signing key
+        env:
+          SIGNING_KEY_BASE64: ${{ secrets.ANDROID_SIGNING_KEY_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/signing"
+          printf '%s' "$SIGNING_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/release.jks"
       - name: Test, lint, and build
-        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        env:
+          ANDROID_SIGNING_STORE_FILE: ${{ runner.temp }}/signing/release.jks
+          ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+          ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
+          ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+        run: gradle --no-daemon :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
+      - name: Create release files
+        env:
+          VERSION: "0.1.0"
+        run: |
+          mkdir -p release-dist
+          apk="release-dist/LiveTranslate-v${VERSION}-arm64-v8a.apk"
+          metadata="release-dist/LiveTranslate-v${VERSION}-metadata.json"
+          cp app/build/outputs/apk/release/app-release.apk "$apk"
+          sha256="$(sha256sum "$apk" | cut -d' ' -f1)"
+          size="$(stat -c '%s' "$apk")"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg sha256 "$sha256" \
+            --argjson size "$size" \
+            --arg commit "$GITHUB_SHA" \
+            --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{
+              schemaVersion: 1,
+              app: "Live Translate",
+              packageName: "com.jadenjsj.livetranslate",
+              versionName: $version,
+              versionCode: 1,
+              buildType: "release",
+              minSdk: 26,
+              targetSdk: 36,
+              compileSdk: 36,
+              supportedAbis: ["arm64-v8a"],
+              supportedCpuFamilies: ["Armv8-A", "Armv9-A"],
+              signingCertificateSha256: "9490968e5b1b76341dbfda5ff5f8d591d1ebbb427c10f69612cfa5285390e4de",
+              apkSha256: $sha256,
+              apkSizeBytes: $size,
+              sourceCommit: $commit,
+              buildRun: $run,
+              model: "qwen3.5-livetranslate-flash-realtime",
+              notes: "Pre-release. Text-only, push-to-talk translation."
+            }' > "$metadata"
       - uses: actions/upload-artifact@v4
         with:
-          name: liveTranslate-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: LiveTranslate-v0.1.0-arm64-v8a
+          path: release-dist/
           if-no-files-found: error
           retention-days: 14

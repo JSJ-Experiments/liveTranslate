@@ -11,8 +11,8 @@ A small, native push-to-talk translator using Alibaba Cloud's
 - On-device connection test with authenticated WebSocket handshake latency.
 - In-app settings for API key, workspace, Beijing/Singapore region, 8/16 kHz
   capture, 40/100/200 ms packets, and translation hotwords.
-- Credentials remain in Android app-private DataStore and are never baked into
-  the APK or CI.
+- The API key is AES-256-GCM encrypted with a non-exportable Android Keystore
+  key. It is never baked into the APK or build output.
 
 The app records immediately when push-to-talk is held. While the WebSocket is
 connecting, audio is buffered locally. Once authenticated, it is streamed to
@@ -28,24 +28,30 @@ Base64/WebSocket overhead; the 8 kHz data-saver option halves that.
 
 ## Setup
 
-1. Install the debug APK from the Blacksmith workflow artifact.
+1. Install the signed `arm64-v8a` APK from the GitHub pre-release or Blacksmith artifact.
 2. Open **Settings**.
 3. Paste a Model Studio API key and its matching workspace ID.
 4. Select the matching region and tap **Test connection**.
 5. Save, choose a direction, then hold the microphone button while speaking.
 
-API keys are region-bound. A long-lived cloud key inside a client app is only
-appropriate for a personal prototype. A public release should use short-lived
-credentials from a backend.
+API keys are region-bound. The stored key is encrypted at rest with Android
+Keystore and backup is disabled. This protects it from ordinary app-to-app
+access and offline extraction, but a compromised/rooted device or an attacker
+controlling the running app can still use it. A public release should use
+short-lived, narrowly scoped credentials from a backend instead of a long-lived
+Model Studio key.
 
 ## Stack
 
 - Kotlin, Jetpack Compose, Material 3, edge-to-edge UI
 - AGP 9.3 built-in Kotlin and its compatible Kotlin/Compose compiler
 - Android 16 compile/target SDK; supports Android 8 and newer
+- `arm64-v8a` only, covering modern Armv8 and Armv9 phones
 - StateFlow + ViewModel, DataStore, coroutines, OkHttp WebSocket
 - One app module; no DI framework, database, navigation graph, or background
   service until the product needs them
+- Stable application ID: `com.jadenjsj.livetranslate`
+- Stable release signing key; release assets include a machine-readable metadata JSON
 
 ## Build and test
 
@@ -53,10 +59,11 @@ Builds intentionally run on Blacksmith, not a developer machine. Push a branch
 or manually dispatch `.github/workflows/android.yml`. CI runs:
 
 ```text
-:app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+:app:testDebugUnitTest :app:lintRelease :app:assembleRelease
 ```
 
-The APK is uploaded as the `liveTranslate-debug` workflow artifact.
+The signed, R8-optimized APK and its metadata JSON are uploaded together as a
+versioned workflow artifact.
 
 The pre-Android API spike remains in `scripts/`, `src/`, and `test/`. Its unit
 tests can be run with `npm test`; a real credentialed smoke test is available

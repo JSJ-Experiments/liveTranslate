@@ -4,17 +4,36 @@ plugins {
 }
 
 android {
-    namespace = "dev.jsj.livetranslate"
+    namespace = "com.jadenjsj.livetranslate"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "dev.jsj.livetranslate"
+        applicationId = "com.jadenjsj.livetranslate"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            // Android's arm64-v8a ABI covers Armv8-A and newer Armv9 devices.
+            abiFilters += "arm64-v8a"
+        }
+    }
+
+    val releaseStoreFile = providers.environmentVariable("ANDROID_SIGNING_STORE_FILE").orNull
+    val releaseStorePassword = providers.environmentVariable("ANDROID_SIGNING_STORE_PASSWORD").orNull
+    val releaseKeyAlias = providers.environmentVariable("ANDROID_SIGNING_KEY_ALIAS").orNull
+    val releaseKeyPassword = providers.environmentVariable("ANDROID_SIGNING_KEY_PASSWORD").orNull
+
+    signingConfigs {
+        create("release") {
+            storeFile = releaseStoreFile?.let(::file)
+            storePassword = releaseStorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
+        }
     }
 
     buildTypes {
@@ -25,6 +44,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

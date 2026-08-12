@@ -1,4 +1,4 @@
-package dev.jsj.livetranslate
+package com.jadenjsj.livetranslate
 
 import org.json.JSONObject
 import java.util.UUID

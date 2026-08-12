@@ -1,4 +1,4 @@
-package dev.jsj.livetranslate
+package com.jadenjsj.livetranslate
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
@@ -10,9 +10,11 @@ import kotlinx.coroutines.flow.map
 private val Context.settingsDataStore by preferencesDataStore(name = "qwen_settings")
 
 class SettingsRepository(private val context: Context) {
+    private val secretStore = SecretStore(context)
+
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { preferences ->
         AppSettings(
-            apiKey = preferences[API_KEY].orEmpty(),
+            apiKey = secretStore.readApiKey(),
             workspaceId = preferences[WORKSPACE_ID].orEmpty(),
             region = runCatching {
                 Region.valueOf(preferences[REGION] ?: Region.Beijing.name)
@@ -24,8 +26,8 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun save(settings: AppSettings) {
+        secretStore.writeApiKey(settings.apiKey)
         context.settingsDataStore.edit { preferences ->
-            preferences[API_KEY] = settings.apiKey.trim()
             preferences[WORKSPACE_ID] = settings.workspaceId.trim()
             preferences[REGION] = settings.region.name
             preferences[SAMPLE_RATE] = settings.sampleRate.toString()
@@ -35,7 +37,6 @@ class SettingsRepository(private val context: Context) {
     }
 
     private companion object {
-        val API_KEY = stringPreferencesKey("api_key")
         val WORKSPACE_ID = stringPreferencesKey("workspace_id")
         val REGION = stringPreferencesKey("region")
         val SAMPLE_RATE = stringPreferencesKey("sample_rate")

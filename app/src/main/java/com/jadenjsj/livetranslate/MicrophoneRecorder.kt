@@ -1,4 +1,4 @@
-package dev.jsj.livetranslate
+package com.jadenjsj.livetranslate
 
 import android.Manifest
 import android.annotation.SuppressLint

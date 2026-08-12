@@ -1,4 +1,4 @@
-package dev.jsj.livetranslate
+package com.jadenjsj.livetranslate
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
