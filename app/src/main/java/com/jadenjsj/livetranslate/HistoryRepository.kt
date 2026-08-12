@@ -61,9 +61,17 @@ internal class TurnCapture(
     }
 
     @Synchronized
-    fun appendServerEvent(raw: String) {
+    fun appendServerEvent(targetLanguage: String, raw: String) {
         if (closed) return
-        events.append(raw)
+        val tagged = runCatching {
+            JSONObject()
+                .put("targetLanguage", targetLanguage)
+                .put("event", JSONObject(raw))
+                .toString()
+        }.getOrElse {
+            JSONObject().put("targetLanguage", targetLanguage).put("raw", raw).toString()
+        }
+        events.append(tagged)
         events.newLine()
         events.flush()
     }

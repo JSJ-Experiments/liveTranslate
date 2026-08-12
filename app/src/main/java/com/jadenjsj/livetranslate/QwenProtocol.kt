@@ -15,8 +15,18 @@ internal fun sessionUpdate(
     direction: TranslationDirection,
     settings: AppSettings = AppSettings(),
     targetLanguage: String = direction.targetLanguage(settings),
+    sourceLanguage: String? = direction.sourceLanguage(settings),
+    serverVad: Boolean = false,
+    skipSameLanguage: Boolean = false,
+    transcribeSource: Boolean = true,
 ): String = event("session.update") {
     val translation = JSONObject().put("language", targetLanguage)
+    if (skipSameLanguage) {
+        translation.put(
+            "same_language_skip_options",
+            JSONObject().put("skip_text", true).put("skip_audio", true),
+        )
+    }
     parseHotwords(settings.hotwords).takeIf { it.length() > 0 }?.let { phrases ->
         translation.put("corpus", JSONObject().put("phrases", phrases))
     }
@@ -27,10 +37,21 @@ internal fun sessionUpdate(
             .put("sample_rate", settings.sampleRate)
             .put("input_audio_format", "pcm")
             .put("input_audio_transcription", JSONObject().apply {
-                put("model", "qwen3-asr-flash-realtime")
-                direction.sourceLanguage(settings)?.let { put("language", it) }
+                if (transcribeSource) {
+                    put("model", "qwen3-asr-flash-realtime")
+                    sourceLanguage?.let { put("language", it) }
+                } else {
+                    put("model", JSONObject.NULL)
+                }
             })
-            .put("turn_detection", JSONObject.NULL)
+            .put(
+                "turn_detection",
+                if (serverVad) JSONObject()
+                    .put("type", "server_vad")
+                    .put("threshold", 0.2)
+                    .put("silence_duration_ms", 800)
+                else JSONObject.NULL,
+            )
             .put("translation", translation),
     )
 }.toString()

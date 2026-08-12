@@ -29,6 +29,9 @@ class SettingsRepository(private val context: Context) {
                 TriggerMode.valueOf(preferences[TRIGGER_MODE] ?: TriggerMode.Hold.name)
             }.getOrDefault(TriggerMode.Hold),
             saveHistory = preferences[SAVE_HISTORY] ?: true,
+            translationMode = runCatching {
+                TranslationMode.valueOf(preferences[TRANSLATION_MODE] ?: TranslationMode.DualEnglishChinese.name)
+            }.getOrDefault(TranslationMode.DualEnglishChinese),
         )
     }
 
@@ -44,6 +47,7 @@ class SettingsRepository(private val context: Context) {
             preferences[SECONDARY_LANGUAGE] = settings.secondaryLanguage
             preferences[TRIGGER_MODE] = settings.triggerMode.name
             preferences[SAVE_HISTORY] = settings.saveHistory
+            preferences[TRANSLATION_MODE] = settings.translationMode.name
         }
     }
 
@@ -57,6 +61,7 @@ class SettingsRepository(private val context: Context) {
         val SECONDARY_LANGUAGE = stringPreferencesKey("secondary_language")
         val TRIGGER_MODE = stringPreferencesKey("trigger_mode")
         val SAVE_HISTORY = booleanPreferencesKey("save_history")
+        val TRANSLATION_MODE = stringPreferencesKey("translation_mode")
     }
 }
 

@@ -19,6 +19,10 @@ internal class QwenRealtimeSession(
     private val direction: TranslationDirection,
     private val onEvent: (QwenServerEvent) -> Unit,
     private val onRawEvent: (String) -> Unit = {},
+    private val options: QwenSessionOptions = QwenSessionOptions(
+        targetLanguage = direction.targetLanguage(settings),
+        sourceLanguage = direction.sourceLanguage(settings),
+    ),
 ) : Closeable {
     private val connected = CompletableDeferred<Unit>()
     private val finished = CompletableDeferred<Unit>()
@@ -29,7 +33,7 @@ internal class QwenRealtimeSession(
     private var webSocket: WebSocket? = null
     @Volatile private var inputCommitted = false
     @Volatile private var finishSent = false
-    @Volatile private var currentTargetLanguage = direction.targetLanguage(settings)
+    @Volatile private var currentTargetLanguage = options.targetLanguage
     @Volatile private var pendingTranslationUpdate: CompletableDeferred<Unit>? = null
 
     suspend fun connect() = withContext(Dispatchers.IO) {
@@ -52,7 +56,7 @@ internal class QwenRealtimeSession(
     }
 
     suspend fun commit() {
-        if (direction == TranslationDirection.Auto) {
+        if (direction == TranslationDirection.Auto && !options.serverVad) {
             withTimeoutOrNull(700) { detectedLanguage.await() }
             pendingTranslationUpdate?.let { update ->
                 withTimeoutOrNull(1_000) { update.await() }
@@ -83,7 +87,18 @@ internal class QwenRealtimeSession(
 
     private inner class Listener : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            if (!webSocket.send(sessionUpdate(direction, settings))) {
+            if (!webSocket.send(
+                    sessionUpdate(
+                        direction = direction,
+                        settings = settings,
+                        targetLanguage = options.targetLanguage,
+                        sourceLanguage = options.sourceLanguage,
+                        serverVad = options.serverVad,
+                        skipSameLanguage = options.skipSameLanguage,
+                        transcribeSource = options.transcribeSource,
+                    ),
+                )
+            ) {
                 fail(IllegalStateException("Could not configure the Qwen session"))
             }
         }
@@ -95,11 +110,17 @@ internal class QwenRealtimeSession(
                     if (!connected.isCompleted) connected.complete(Unit)
                     else pendingTranslationUpdate?.complete(Unit)
                 }
-                QwenServerEvent.ResponseDone -> if (inputCommitted && !finishSent) {
-                    finishSent = true
-                    webSocket.send(simpleEvent("session.finish"))
+                QwenServerEvent.ResponseDone -> {
+                    onEvent(event)
+                    if (inputCommitted && !options.serverVad && !finishSent) {
+                        finishSent = true
+                        webSocket.send(simpleEvent("session.finish"))
+                    }
                 }
-                QwenServerEvent.SessionFinished -> finished.complete(Unit)
+                QwenServerEvent.SessionFinished -> {
+                    onEvent(event)
+                    finished.complete(Unit)
+                }
                 is QwenServerEvent.Error -> fail(IllegalStateException(event.message))
                 else -> {
                     adaptAutoDirection(event, webSocket)
@@ -109,7 +130,7 @@ internal class QwenRealtimeSession(
         }
 
         private fun adaptAutoDirection(event: QwenServerEvent, webSocket: WebSocket) {
-            if (direction != TranslationDirection.Auto || inputCommitted) return
+            if (direction != TranslationDirection.Auto || inputCommitted || options.serverVad) return
             val language = when (event) {
                 is QwenServerEvent.SourcePreview -> event.language
                 is QwenServerEvent.SourceDone -> event.language
@@ -148,3 +169,11 @@ internal class QwenRealtimeSession(
         }
     }
 }
+
+internal data class QwenSessionOptions(
+    val targetLanguage: String,
+    val sourceLanguage: String? = null,
+    val serverVad: Boolean = false,
+    val skipSameLanguage: Boolean = false,
+    val transcribeSource: Boolean = true,
+)

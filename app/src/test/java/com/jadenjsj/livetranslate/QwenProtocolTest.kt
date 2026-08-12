@@ -52,6 +52,34 @@ class QwenProtocolTest {
     }
 
     @Test
+    fun `dual target session enables VAD and same-language skipping`() {
+        val session = JSONObject(
+            sessionUpdate(
+                direction = TranslationDirection.Auto,
+                targetLanguage = "zh",
+                sourceLanguage = null,
+                serverVad = true,
+                skipSameLanguage = true,
+            ),
+        ).getJSONObject("session")
+        assertEquals("server_vad", session.getJSONObject("turn_detection").getString("type"))
+        assertTrue(session.getJSONObject("translation")
+            .getJSONObject("same_language_skip_options").getBoolean("skip_text"))
+    }
+
+    @Test
+    fun `secondary stream can disable duplicate source transcription`() {
+        val session = JSONObject(
+            sessionUpdate(
+                direction = TranslationDirection.Auto,
+                targetLanguage = "en",
+                transcribeSource = false,
+            ),
+        ).getJSONObject("session")
+        assertTrue(session.getJSONObject("input_audio_transcription").isNull("model"))
+    }
+
+    @Test
     fun `manual direction uses the selected language pair`() {
         val settings = AppSettings(primaryLanguage = "ja", secondaryLanguage = "fr")
         val forward = JSONObject(sessionUpdate(TranslationDirection.EnglishToChinese, settings))

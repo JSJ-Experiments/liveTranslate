@@ -72,6 +72,19 @@ enum class TriggerMode(val label: String) {
     Tap("Tap to start / stop"),
 }
 
+enum class TranslationMode(val label: String, val description: String) {
+    DualEnglishChinese(
+        "Reliable English ↔ Chinese",
+        "Two parallel target streams. Most reliable automatic direction; roughly doubles audio input usage.",
+    ),
+    DetectedPair(
+        "Auto source → Language B",
+        "One stream with automatic source detection and one fixed target. Cheaper than two-way mode.",
+    ),
+    ManualForward("Language A → B", "One stream with a fixed direction."),
+    ManualReverse("Language B → A", "One stream with a fixed direction."),
+}
+
 data class TranslationTurn(
     val id: Long,
     val sourceText: String,
@@ -98,6 +111,7 @@ data class AppSettings(
     val secondaryLanguage: String = "zh",
     val triggerMode: TriggerMode = TriggerMode.Hold,
     val saveHistory: Boolean = true,
+    val translationMode: TranslationMode = TranslationMode.DualEnglishChinese,
 ) {
     val isComplete: Boolean get() = apiKey.isNotBlank() && workspaceId.isNotBlank()
 }
@@ -116,6 +130,7 @@ data class TranslationUiState(
     val settings: AppSettings = AppSettings(),
     val direction: TranslationDirection = TranslationDirection.Auto,
     val turns: List<TranslationTurn> = emptyList(),
+    val liveTurns: List<TranslationTurn> = emptyList(),
     val sourceText: String = "",
     val translationText: String = "",
     val detectedSourceLanguage: String? = null,
@@ -123,8 +138,10 @@ data class TranslationUiState(
     val phase: SessionPhase = SessionPhase.Idle,
     val error: String? = null,
     val settingsOpen: Boolean = false,
+    val historyOpen: Boolean = false,
     val settingsLoaded: Boolean = false,
     val connectionTestResult: String? = null,
+    val isOnline: Boolean = true,
 ) {
     val isActive: Boolean
         get() = phase != SessionPhase.Idle && phase != SessionPhase.Error

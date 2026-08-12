@@ -30,12 +30,13 @@ class MainActivity : ComponentActivity() {
 
                 LiveTranslateScreen(
                     state = state,
-                    onDirectionChange = viewModel::setDirection,
                     onOpenSettings = viewModel::openSettings,
                     onCloseSettings = viewModel::closeSettings,
                     onSaveSettings = viewModel::saveSettings,
                     onTestConnection = viewModel::testConnection,
-                    onClear = viewModel::clearTranscript,
+                    onOpenHistory = viewModel::openHistory,
+                    onCloseHistory = viewModel::closeHistory,
+                    onClearHistory = viewModel::clearHistory,
                     onPlayTurn = viewModel::playRecording,
                     onTalkStart = {
                         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {

@@ -5,14 +5,18 @@ A small, native push-to-talk translator using Alibaba Cloud's
 
 ## MVP features
 
-- Automatic direction for a user-selectable pair of Qwen's 60 supported languages,
-  plus explicit manual directions.
-- Compact, persistent conversation history with live source and translation text.
+- Reliable automatic English ↔ Chinese direction is the default and uses two
+  parallel Qwen targets with same-language skipping. Cheaper one-stream and
+  fixed-direction modes remain available in Settings.
+- Compact live source/translation segments use server VAD; completed history is
+  kept on a separate screen rather than consuming interpreter space.
   It follows new text until the user scrolls away.
 - True hold-to-talk interaction with visible microphone glow and release-to-send.
 - Configurable hold-to-talk or tap-to-start/tap-to-send microphone interaction.
-- Optional app-private WAV recording and raw Qwen JSONL event archive per turn,
-  with recording playback from the transcript.
+- Optional app-private full-session WAV and target-tagged raw Qwen JSONL archive,
+  with playback from History rather than the live interpreter.
+- Rotating app-private connection/error log at
+  `files/debug_logs/livetranslate.log`, accessible with `adb run-as`.
 - Explicit connection states: disconnected, connecting, live, sending, and translating.
 - On-device connection test with authenticated WebSocket handshake latency.
 - In-app settings for API key, workspace, Beijing/Singapore region, 8/16 kHz
