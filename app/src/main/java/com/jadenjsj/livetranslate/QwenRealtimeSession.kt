@@ -51,6 +51,7 @@ internal class QwenRealtimeSession(
     }
 
     fun append(pcm: ByteArray) {
+        check(!finished.isCompleted) { "Audio connection was lost" }
         val audio = Base64.encodeToString(pcm, Base64.NO_WRAP)
         check(webSocket?.send(appendAudio(audio)) == true) { "Audio connection was lost" }
     }

@@ -11,13 +11,17 @@ A small, native push-to-talk translator using Alibaba Cloud's
 - Compact live source/translation segments use server VAD; completed history is
   kept on a separate screen rather than consuming interpreter space.
   It follows new text until the user scrolls away.
-- True hold-to-talk interaction with visible microphone glow and release-to-send.
+- Full-width hold-to-talk interaction with visible microphone glow and release-to-send.
 - Configurable hold-to-talk or tap-to-start/tap-to-send microphone interaction.
-- Optional app-private full-session WAV and target-tagged raw Qwen JSONL archive,
-  with playback from History rather than the live interpreter.
-- Rotating app-private connection/error log at
-  `files/debug_logs/livetranslate.log`, accessible with `adb run-as`.
-- Explicit connection states: disconnected, connecting, live, sending, and translating.
+- Optional app-private full-session WAV and target-tagged raw Qwen JSONL archive.
+  History is organized by session, with a transcript detail view, seeker,
+  play/pause, and playback speed controls.
+- Rotating app-private connection/error log at `files/debug_logs/livetranslate.log`.
+  History's Export action shares a readable diagnostics ZIP containing logs,
+  raw events, transcripts, and audio.
+- Explicit connection states: disconnected, connecting, live, sending, and translating,
+  with a force-retry action. VPN reachability is confirmed by the Qwen probe rather
+  than Android's sometimes-stale network validation bit.
 - On-device connection test with authenticated WebSocket handshake latency.
 - In-app settings for API key, workspace, Beijing/Singapore region, 8/16 kHz
   capture, 40/100/200 ms packets, and translation hotwords.
@@ -46,9 +50,10 @@ option halves that.
    the microphone button while speaking and release to send.
 
 Qwen can auto-detect the source language but still requires one target language.
-In Auto mode the app listens for Qwen's detected source code while audio streams,
-updates the target to the other side of the selected pair, then commits
-the push-to-talk turn. Manual direction buttons remain available as a fallback.
+The default English/Chinese mode therefore sends the same audio to two Qwen
+sessions, one targeting English and one Chinese, and asks each to skip audio
+already in its target language. The cheaper auto-source mode uses one fixed,
+user-selectable target. Manual directions remain available as a fallback.
 
 API keys are region-bound. The stored key is encrypted at rest with Android
 Keystore and backup is disabled. This protects it from ordinary app-to-app

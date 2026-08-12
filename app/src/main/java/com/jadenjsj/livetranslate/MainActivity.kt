@@ -38,7 +38,12 @@ class MainActivity : ComponentActivity() {
                     onCloseHistory = viewModel::closeHistory,
                     onClearHistory = viewModel::clearHistory,
                     onExportDiagnostics = viewModel::exportDiagnostics,
-                    onPlayTurn = viewModel::playRecording,
+                    onSelectHistory = viewModel::selectHistorySession,
+                    onCloseHistorySession = viewModel::closeHistorySession,
+                    onTogglePlayback = viewModel::togglePlayback,
+                    onSeekPlayback = viewModel::seekPlayback,
+                    onPlaybackSpeed = viewModel::setPlaybackSpeed,
+                    onRetry = viewModel::forceRetry,
                     onTalkStart = {
                         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                             viewModel.startTalking()

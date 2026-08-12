@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
+import android.media.AudioDeviceInfo
 import android.media.MediaRecorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,6 +23,8 @@ class MicrophoneRecorder(private val context: Context) {
         scope: CoroutineScope,
         sampleRate: Int,
         chunkMilliseconds: Int,
+        mode: MicrophoneMode,
+        onDiagnostic: (String) -> Unit = {},
         onAudio: (ByteArray) -> Unit,
     ) {
         check(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -37,7 +40,15 @@ class MicrophoneRecorder(private val context: Context) {
         check(minimum > 0) { "This device cannot record 16 kHz audio" }
         val bytesPerChunk = sampleRate * 2 * chunkMilliseconds / 1_000
         val bufferSize = maxOf(minimum * 2, bytesPerChunk * 4)
-        val audioRecord = createAndStartRecorder(sampleRate, bufferSize)
+        val audioRecord = createAndStartRecorder(sampleRate, bufferSize, mode)
+        val inputs = context.getSystemService(android.media.AudioManager::class.java)
+            .getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)
+            .joinToString { "${it.productName}(${deviceType(it.type)})" }
+        onDiagnostic(
+            "Microphone started preset=${mode.name}, source=${sourceName(audioRecord.audioSource)}, " +
+                "route=${audioRecord.routedDevice?.let { "${it.productName}(${deviceType(it.type)})" } ?: "pending"}, " +
+                "available=[$inputs]",
+        )
         recorder = audioRecord
         readJob = scope.launch(Dispatchers.IO) {
             val buffer = ByteArray(bytesPerChunk)
@@ -59,19 +70,28 @@ class MicrophoneRecorder(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun createAndStartRecorder(sampleRate: Int, bufferSize: Int): AudioRecord {
+    private fun createAndStartRecorder(sampleRate: Int, bufferSize: Int, mode: MicrophoneMode): AudioRecord {
         val format = AudioFormat.Builder()
             .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
             .setSampleRate(sampleRate)
             .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
             .build()
-        val sources = listOf(
-            // Some OEM audio HALs reject VOICE_COMMUNICATION at 16 kHz. Keep
-            // its echo processing when available, then fall back gracefully.
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            MediaRecorder.AudioSource.MIC,
-        )
+        val sources = when (mode) {
+            MicrophoneMode.Speech -> listOf(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                MediaRecorder.AudioSource.MIC,
+            )
+            MicrophoneMode.Communication -> listOf(
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.MIC,
+            )
+            MicrophoneMode.Unprocessed -> listOf(
+                MediaRecorder.AudioSource.UNPROCESSED,
+                MediaRecorder.AudioSource.MIC,
+            )
+        }
         val failures = mutableListOf<Throwable>()
 
         for (source in sources) {
@@ -103,4 +123,21 @@ class MicrophoneRecorder(private val context: Context) {
         )
     }
 
+}
+
+private fun sourceName(source: Int): String = when (source) {
+    MediaRecorder.AudioSource.VOICE_RECOGNITION -> "VOICE_RECOGNITION"
+    MediaRecorder.AudioSource.VOICE_COMMUNICATION -> "VOICE_COMMUNICATION"
+    MediaRecorder.AudioSource.UNPROCESSED -> "UNPROCESSED"
+    MediaRecorder.AudioSource.MIC -> "MIC"
+    else -> source.toString()
+}
+
+private fun deviceType(type: Int): String = when (type) {
+    AudioDeviceInfo.TYPE_BUILTIN_MIC -> "built-in"
+    AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired"
+    AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth SCO"
+    AudioDeviceInfo.TYPE_BLE_HEADSET -> "Bluetooth LE"
+    AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET -> "USB"
+    else -> type.toString()
 }

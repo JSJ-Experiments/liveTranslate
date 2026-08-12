@@ -1,6 +1,7 @@
 package com.jadenjsj.livetranslate
 
 import android.content.Context
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedWriter
 import java.io.File
@@ -17,6 +18,7 @@ internal class HistoryRepository(context: Context) {
         .mapNotNull { directory ->
             runCatching {
                 val json = JSONObject(File(directory, "turn.json").readText())
+                val segments = json.optJSONArray("segments")?.let(::parseSegments).orEmpty()
                 TranslationTurn(
                     id = json.getLong("id"),
                     sourceText = json.optString("sourceText"),
@@ -25,6 +27,8 @@ internal class HistoryRepository(context: Context) {
                     targetLanguage = json.getString("targetLanguage"),
                     createdAtMillis = json.getLong("createdAtMillis"),
                     audioPath = File(directory, "audio.wav").takeIf(File::exists)?.absolutePath,
+                    durationMillis = json.optLong("durationMillis"),
+                    segments = segments,
                 ).takeIf { it.sourceText.isNotBlank() || it.translationText.isNotBlank() }
             }.getOrNull()
         }
@@ -84,7 +88,23 @@ internal class TurnCapture(
             events.close()
             closed = true
         }
-        val saved = turn.copy(audioPath = audioFile.takeIf { audioBytes > 0 }?.absolutePath)
+        val durationMillis = audioBytes * 1_000L / (sampleRate * 2L)
+        val saved = turn.copy(
+            audioPath = audioFile.takeIf { audioBytes > 0 }?.absolutePath,
+            durationMillis = durationMillis,
+        )
+        val segments = JSONArray().apply {
+            saved.segments.forEach { segment ->
+                put(
+                    JSONObject()
+                        .put("id", segment.id)
+                        .put("sourceText", segment.sourceText)
+                        .put("translationText", segment.translationText)
+                        .put("sourceLanguage", segment.sourceLanguage ?: "")
+                        .put("targetLanguage", segment.targetLanguage),
+                )
+            }
+        }
         File(directory, "turn.json").writeText(
             JSONObject()
                 .put("id", saved.id)
@@ -95,6 +115,8 @@ internal class TurnCapture(
                 .put("createdAtMillis", saved.createdAtMillis)
                 .put("sampleRate", sampleRate)
                 .put("audioBytes", audioBytes)
+                .put("durationMillis", saved.durationMillis)
+                .put("segments", segments)
                 .toString(2),
         )
         return saved
@@ -133,5 +155,20 @@ internal class TurnCapture(
 
     private companion object {
         const val WAV_HEADER_SIZE = 44
+    }
+}
+
+private fun parseSegments(json: JSONArray): List<TranslationSegment> = buildList {
+    for (index in 0 until json.length()) {
+        val item = json.optJSONObject(index) ?: continue
+        add(
+            TranslationSegment(
+                id = item.optLong("id", index.toLong()),
+                sourceText = item.optString("sourceText"),
+                translationText = item.optString("translationText"),
+                sourceLanguage = item.optString("sourceLanguage").takeIf(String::isNotBlank),
+                targetLanguage = item.optString("targetLanguage"),
+            ),
+        )
     }
 }

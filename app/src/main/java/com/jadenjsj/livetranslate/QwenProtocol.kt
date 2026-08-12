@@ -49,7 +49,7 @@ internal fun sessionUpdate(
                 if (serverVad) JSONObject()
                     .put("type", "server_vad")
                     .put("threshold", 0.2)
-                    .put("silence_duration_ms", 800)
+                    .put("silence_duration_ms", settings.vadSilenceMilliseconds)
                 else JSONObject.NULL,
             )
             .put("translation", translation),

@@ -53,9 +53,11 @@ class QwenProtocolTest {
 
     @Test
     fun `dual target session enables VAD and same-language skipping`() {
+        val settings = AppSettings(vadSilenceMilliseconds = 400)
         val session = JSONObject(
             sessionUpdate(
                 direction = TranslationDirection.Auto,
+                settings = settings,
                 targetLanguage = "zh",
                 sourceLanguage = null,
                 serverVad = true,
@@ -63,6 +65,7 @@ class QwenProtocolTest {
             ),
         ).getJSONObject("session")
         assertEquals("server_vad", session.getJSONObject("turn_detection").getString("type"))
+        assertEquals(400, session.getJSONObject("turn_detection").getInt("silence_duration_ms"))
         assertTrue(session.getJSONObject("translation")
             .getJSONObject("same_language_skip_options").getBoolean("skip_text"))
     }

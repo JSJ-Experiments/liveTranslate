@@ -47,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -77,6 +78,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun LiveTranslateScreen(
@@ -89,7 +92,12 @@ fun LiveTranslateScreen(
     onCloseHistory: () -> Unit,
     onClearHistory: () -> Unit,
     onExportDiagnostics: () -> Unit,
-    onPlayTurn: (TranslationTurn) -> Unit,
+    onSelectHistory: (Long) -> Unit,
+    onCloseHistorySession: () -> Unit,
+    onTogglePlayback: (TranslationTurn) -> Unit,
+    onSeekPlayback: (Long) -> Unit,
+    onPlaybackSpeed: (Float) -> Unit,
+    onRetry: () -> Unit,
     onTalkStart: () -> Unit,
     onTalkStop: () -> Unit,
 ) {
@@ -99,9 +107,12 @@ fun LiveTranslateScreen(
             .background(MaterialTheme.colorScheme.background),
     ) {
         if (state.historyOpen) {
-            HistoryScreen(state, onCloseHistory, onClearHistory, onExportDiagnostics, onPlayTurn)
+            HistoryScreen(
+                state, onCloseHistory, onClearHistory, onExportDiagnostics, onSelectHistory,
+                onCloseHistorySession, onTogglePlayback, onSeekPlayback, onPlaybackSpeed,
+            )
         } else {
-            InterpreterScreen(state, onOpenHistory, onOpenSettings, onTalkStart, onTalkStop)
+            InterpreterScreen(state, onOpenHistory, onOpenSettings, onRetry, onTalkStart, onTalkStop)
         }
     }
 
@@ -122,6 +133,7 @@ private fun InterpreterScreen(
     state: TranslationUiState,
     onOpenHistory: () -> Unit,
     onOpenSettings: () -> Unit,
+    onRetry: () -> Unit,
     onTalkStart: () -> Unit,
     onTalkStop: () -> Unit,
 ) {
@@ -133,11 +145,11 @@ private fun InterpreterScreen(
             .padding(horizontal = 16.dp),
     ) {
         CompactTopBar(state, onOpenHistory, onOpenSettings)
-        AttentionBanner(state)
+        AttentionBanner(state, onRetry)
         LiveTranscript(state, Modifier.weight(1f))
         PushToTalk(
             phase = state.phase,
-            ready = state.settings.isComplete && state.isOnline,
+            ready = state.settings.isComplete,
             triggerMode = state.settings.triggerMode,
             onStart = onTalkStart,
             onStop = onTalkStop,
@@ -198,14 +210,15 @@ private fun connectionDescription(state: TranslationUiState): String = when {
 }
 
 @Composable
-private fun AttentionBanner(state: TranslationUiState) {
+private fun AttentionBanner(state: TranslationUiState, onRetry: () -> Unit) {
     val message = when {
         !state.isOnline -> "Offline · reconnect to the internet before starting"
         state.phase == SessionPhase.Error -> state.error ?: "Translation connection failed"
-        state.phase == SessionPhase.Connecting -> "Connecting to Qwen…"
+        state.phase == SessionPhase.Connecting -> state.error ?: "Connecting to Qwen…"
+        state.phase == SessionPhase.Testing -> "Checking the Qwen connection…"
         else -> null
     } ?: return
-    val warning = state.phase == SessionPhase.Connecting
+    val warning = state.phase == SessionPhase.Connecting || state.phase == SessionPhase.Testing
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -214,12 +227,20 @@ private fun AttentionBanner(state: TranslationUiState) {
         contentColor = if (warning) Color(0xFF5F4200) else MaterialTheme.colorScheme.onErrorContainer,
         shape = RoundedCornerShape(12.dp),
     ) {
-        Text(
-            text = message,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Row(
+            Modifier.padding(start = 12.dp, end = 5.dp, top = 5.dp, bottom = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = message,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (!warning) {
+                TextButton(onClick = onRetry, enabled = state.phase != SessionPhase.Testing) { Text("Retry") }
+            }
+        }
     }
 }
 
@@ -339,8 +360,24 @@ private fun HistoryScreen(
     onBack: () -> Unit,
     onClear: () -> Unit,
     onExport: () -> Unit,
-    onPlayTurn: (TranslationTurn) -> Unit,
+    onSelect: (Long) -> Unit,
+    onCloseSession: () -> Unit,
+    onTogglePlayback: (TranslationTurn) -> Unit,
+    onSeekPlayback: (Long) -> Unit,
+    onPlaybackSpeed: (Float) -> Unit,
 ) {
+    val selected = state.selectedHistoryId?.let { id -> state.turns.firstOrNull { it.id == id } }
+    if (selected != null) {
+        HistoryDetailScreen(
+            turn = selected,
+            playback = state.playback,
+            onBack = onCloseSession,
+            onTogglePlayback = { onTogglePlayback(selected) },
+            onSeekPlayback = onSeekPlayback,
+            onPlaybackSpeed = onPlaybackSpeed,
+        )
+        return
+    }
     Column(
         Modifier
             .fillMaxSize()
@@ -377,7 +414,7 @@ private fun HistoryScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(state.turns.asReversed(), key = TranslationTurn::id) { turn ->
-                    HistoryItem(turn, onPlayTurn)
+                    HistoryItem(turn) { onSelect(turn.id) }
                 }
             }
         }
@@ -385,33 +422,167 @@ private fun HistoryScreen(
 }
 
 @Composable
-private fun HistoryItem(turn: TranslationTurn, onPlay: (TranslationTurn) -> Unit) {
+private fun HistoryItem(turn: TranslationTurn, onOpen: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
+        onClick = onOpen,
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = RoundedCornerShape(18.dp),
     ) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(turn.createdAtMillis)),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "${turn.segments.size.takeIf { it > 0 } ?: 1} segments · ${formatTime(turn.durationMillis)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
                 turn.sourceText.ifBlank { "Source transcript unavailable" },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 turn.translationText,
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
             )
-            if (turn.audioPath != null) {
-                TextButton(onClick = { onPlay(turn) }, contentPadding = PaddingValues(0.dp)) {
-                    Icon(painterResource(R.drawable.ic_play), null, Modifier.size(17.dp))
-                    Spacer(Modifier.size(5.dp))
-                    Text("Play full recording")
+        }
+    }
+}
+
+@Composable
+private fun HistoryDetailScreen(
+    turn: TranslationTurn,
+    playback: PlaybackState,
+    onBack: () -> Unit,
+    onTogglePlayback: () -> Unit,
+    onSeekPlayback: (Long) -> Unit,
+    onPlaybackSpeed: (Float) -> Unit,
+) {
+    val segments = turn.segments.ifEmpty {
+        listOf(
+            TranslationSegment(
+                id = turn.id,
+                sourceText = turn.sourceText,
+                translationText = turn.translationText,
+                sourceLanguage = turn.sourceLanguage,
+                targetLanguage = turn.targetLanguage,
+            ),
+        )
+    }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp),
+    ) {
+        Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(painterResource(R.drawable.ic_back), "Back to sessions", tint = MaterialTheme.colorScheme.onSurface)
+            }
+            Column {
+                Text("Saved session", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(turn.createdAtMillis)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (turn.audioPath != null) {
+            AudioPlayer(
+                playback = playback.copy(
+                    sessionId = turn.id,
+                    durationMillis = playback.durationMillis.takeIf { it > 0 } ?: turn.durationMillis,
+                ),
+                onToggle = onTogglePlayback,
+                onSeek = onSeekPlayback,
+                onSpeed = onPlaybackSpeed,
+            )
+        }
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
+        ) {
+            items(segments, key = TranslationSegment::id) { segment ->
+                LiveSegment(
+                    TranslationTurn(
+                        id = segment.id,
+                        sourceText = segment.sourceText,
+                        translationText = segment.translationText,
+                        sourceLanguage = segment.sourceLanguage,
+                        targetLanguage = segment.targetLanguage,
+                    ),
+                    active = false,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioPlayer(
+    playback: PlaybackState,
+    onToggle: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onSpeed: (Float) -> Unit,
+) {
+    Surface(
+        Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(18.dp),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onToggle) {
+                    Icon(
+                        painterResource(if (playback.isPlaying) R.drawable.ic_pause else R.drawable.ic_play),
+                        if (playback.isPlaying) "Pause" else "Play",
+                    )
+                }
+                Slider(
+                    value = playback.positionMillis.toFloat(),
+                    onValueChange = { onSeek(it.toLong()) },
+                    valueRange = 0f..playback.durationMillis.coerceAtLeast(1).toFloat(),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${formatTime(playback.positionMillis)} / ${formatTime(playback.durationMillis)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                listOf(0.75f, 1f, 1.25f, 1.5f, 2f).forEach { speed ->
+                    FilterChip(
+                        selected = playback.speed == speed,
+                        onClick = { onSpeed(speed) },
+                        label = { Text("${speed}×") },
+                        modifier = Modifier.padding(start = 3.dp),
+                    )
                 }
             }
         }
     }
+}
+
+private fun formatTime(milliseconds: Long): String {
+    val seconds = milliseconds.coerceAtLeast(0) / 1_000
+    return "%d:%02d".format(seconds / 60, seconds % 60)
 }
 
 private fun languageLabel(code: String?): String = when {
@@ -430,12 +601,11 @@ private fun PushToTalk(
     onStop: () -> Unit,
 ) {
     val active = phase == SessionPhase.Connecting || phase == SessionPhase.Listening
-    val micColor = if (active) Color(0xFFE5484D) else Color(0xFF1976ED)
+    val micColor = if (active) Color(0xFFE5484D) else MaterialTheme.colorScheme.primary
     val color by animateColorAsState(micColor, label = "mic color")
-    val scale by animateFloatAsState(if (active) 1.07f else 1f, label = "mic scale")
     val pulse by rememberInfiniteTransition(label = "mic glow").animateFloat(
-        initialValue = 0.88f,
-        targetValue = 1.25f,
+        initialValue = 0.10f,
+        targetValue = 0.30f,
         animationSpec = infiniteRepeatable(tween(850), RepeatMode.Reverse),
         label = "mic pulse",
     )
@@ -445,22 +615,32 @@ private fun PushToTalk(
     val currentPhase by rememberUpdatedState(phase)
     val currentMode by rememberUpdatedState(triggerMode)
     val label = when (phase) {
-        SessionPhase.Listening -> if (triggerMode == TriggerMode.Hold) "RELEASE TO STOP" else "TAP TO STOP"
-        SessionPhase.Connecting -> "CONNECTING…"
-        SessionPhase.Sending, SessionPhase.Translating -> "FINISHING…"
-        else -> if (!ready) "OFFLINE / SETUP REQUIRED"
-        else if (triggerMode == TriggerMode.Hold) "HOLD TO TALK" else "TAP TO START"
+        SessionPhase.Listening -> if (triggerMode == TriggerMode.Hold) "Listening · release to send" else "Listening · tap to send"
+        SessionPhase.Connecting -> "Connecting · keep speaking"
+        SessionPhase.Sending, SessionPhase.Translating -> "Sending · finishing translation"
+        else -> if (!ready) "Open Settings to connect"
+        else if (triggerMode == TriggerMode.Hold) "Hold to speak" else "Tap to start listening"
     }
 
-    Column(
+    Box(
         Modifier
             .fillMaxWidth()
-            .padding(top = 2.dp, bottom = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .padding(top = 6.dp, bottom = 10.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
+        if (active) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(66.dp)
+                    .graphicsLayer { alpha = pulse }
+                    .background(color, RoundedCornerShape(24.dp)),
+            )
+        }
+        Surface(
             Modifier
-                .size(82.dp)
+                .fillMaxWidth()
+                .height(62.dp)
                 .semantics {
                     role = Role.Button
                     contentDescription = label
@@ -485,41 +665,26 @@ private fun PushToTalk(
                         } else waitForUpOrCancellation()
                     }
                 },
-            contentAlignment = Alignment.Center,
+            color = color,
+            contentColor = Color.White,
+            shape = RoundedCornerShape(20.dp),
+            tonalElevation = if (active) 5.dp else 1.dp,
         ) {
-            if (active) {
-                Box(
-                    Modifier
-                        .size(72.dp)
-                        .graphicsLayer {
-                            scaleX = pulse
-                            scaleY = pulse
-                            alpha = 0.2f
-                        }
-                        .background(color, CircleShape),
-                )
-            }
-            Box(
-                Modifier
-                    .scale(scale)
-                    .size(64.dp)
-                    .background(color, CircleShape),
-                contentAlignment = Alignment.Center,
+            Row(
+                Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
             ) {
                 Icon(
                     painterResource(R.drawable.ic_mic),
                     null,
-                    Modifier.size(29.dp),
+                    Modifier.size(25.dp),
                     tint = Color.White,
                 )
+                Spacer(Modifier.size(10.dp))
+                Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
             }
         }
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = if (active) color else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
@@ -543,6 +708,8 @@ private fun SettingsSheet(
     var secondaryLanguage by rememberSaveable(initial.secondaryLanguage) { mutableStateOf(initial.secondaryLanguage) }
     var triggerMode by rememberSaveable(initial.triggerMode.name) { mutableStateOf(initial.triggerMode.name) }
     var translationMode by rememberSaveable(initial.translationMode.name) { mutableStateOf(initial.translationMode.name) }
+    var microphoneMode by rememberSaveable(initial.microphoneMode.name) { mutableStateOf(initial.microphoneMode.name) }
+    var vadSilenceMilliseconds by rememberSaveable(initial.vadSilenceMilliseconds) { mutableStateOf(initial.vadSilenceMilliseconds) }
     var saveHistory by rememberSaveable(initial.saveHistory) { mutableStateOf(initial.saveHistory) }
     var showKey by rememberSaveable { mutableStateOf(false) }
 
@@ -558,6 +725,8 @@ private fun SettingsSheet(
         triggerMode = TriggerMode.valueOf(triggerMode),
         saveHistory = saveHistory,
         translationMode = TranslationMode.valueOf(translationMode),
+        microphoneMode = MicrophoneMode.valueOf(microphoneMode),
+        vadSilenceMilliseconds = vadSilenceMilliseconds,
     )
 
     ModalBottomSheet(
@@ -623,11 +792,20 @@ private fun SettingsSheet(
                     }
                 }
             }
-            if (translationMode != TranslationMode.DualEnglishChinese.name) {
+            when (TranslationMode.valueOf(translationMode)) {
+                TranslationMode.DualEnglishChinese -> Unit
+                TranslationMode.DetectedPair -> {
+                    LanguagePicker("Translation target", secondaryLanguage) { secondaryLanguage = it }
+                    Text(
+                        "Qwen automatically detects the spoken source language. It does not automatically reverse the fixed target.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TranslationMode.ManualForward, TranslationMode.ManualReverse -> {
                 LanguagePicker("Language A", primaryLanguage) { if (it != secondaryLanguage) primaryLanguage = it }
                 LanguagePicker("Language B", secondaryLanguage) { if (it != primaryLanguage) secondaryLanguage = it }
-            } else {
-                ReadOnlySetting("Language pair", "English ↔ Chinese", "This reliable mode uses two simultaneous target streams.")
+                }
             }
             OutlinedTextField(
                 value = hotwords,
@@ -643,6 +821,31 @@ private fun SettingsSheet(
             SectionLabel("AUDIO")
             Text("Microphone trigger", style = MaterialTheme.typography.labelLarge)
             ChoiceRow(TriggerMode.entries.map { it.name to it.label }, triggerMode) { triggerMode = it }
+            Text("Microphone processing", style = MaterialTheme.typography.labelLarge)
+            MicrophoneMode.entries.forEach { mode ->
+                val selected = microphoneMode == mode.name
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { microphoneMode = mode.name },
+                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Column(Modifier.padding(13.dp)) {
+                        Text(mode.label, fontWeight = FontWeight.SemiBold)
+                        Text(mode.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            Text(
+                "Xiaomi exposes bottom/back logical inputs, but its audio HAL—not normal Android apps—chooses the individual capsules in the quad-mic array. The speech preset is the best default.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text("Sentence split pause", style = MaterialTheme.typography.labelLarge)
+            ChoiceRow(
+                listOf("400" to "400 ms · fast", "700" to "700 ms", "1200" to "1.2 s · long"),
+                vadSilenceMilliseconds.toString(),
+            ) { vadSilenceMilliseconds = it.toInt() }
             ReadOnlySetting("Format", "PCM 16-bit mono", "Opus remains deferred until packet interoperability is tested.")
             Text("Quality / sample rate", style = MaterialTheme.typography.labelLarge)
             ChoiceRow(listOf("8000" to "8 kHz · saver", "16000" to "16 kHz · best"), sampleRate.toString()) {

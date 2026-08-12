@@ -28,6 +28,11 @@ internal class NetworkMonitor(context: Context, private val onStateChange: (Bool
         )
     }
 
+    fun refreshNow(): Boolean {
+        refresh()
+        return mutableOnline.value
+    }
+
     private fun refresh() {
         val online = connectivity.isCurrentlyOnline()
         if (online != mutableOnline.value) onStateChange(online)
@@ -42,6 +47,7 @@ internal class NetworkMonitor(context: Context, private val onStateChange: (Bool
 private fun ConnectivityManager.isCurrentlyOnline(): Boolean {
     val network = activeNetwork ?: return false
     val capabilities = getNetworkCapabilities(network) ?: return false
-    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    // VALIDATED is frequently stale or absent behind VPNs. The Qwen WebSocket
+    // probe remains the authoritative reachability check.
+    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }

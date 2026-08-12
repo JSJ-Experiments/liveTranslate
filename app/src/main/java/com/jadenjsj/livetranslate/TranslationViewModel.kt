@@ -2,6 +2,7 @@ package com.jadenjsj.livetranslate
 
 import android.app.Application
 import android.media.MediaPlayer
+import android.media.PlaybackParams
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.IOException
@@ -17,13 +18,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 class TranslationViewModel(application: Application) : AndroidViewModel(application) {
+    private val debugLog = DebugLog(application)
     private val repository = SettingsRepository(application)
     private val microphone = MicrophoneRecorder(application)
     private val history = HistoryRepository(application)
-    private val debugLog = DebugLog(application)
     private val debugExporter = DebugExporter(application)
     private val networkMonitor = NetworkMonitor(application) { online ->
         debugLog.write(if (online) "INFO" else "WARN", if (online) "Network restored" else "Network lost")
@@ -35,6 +37,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     private var sessionJob: kotlinx.coroutines.Job? = null
     private var testJob: kotlinx.coroutines.Job? = null
     private var mediaPlayer: MediaPlayer? = null
+    private var playbackJob: kotlinx.coroutines.Job? = null
     private val segmentIds = AtomicLong(System.currentTimeMillis())
 
     init {
@@ -54,7 +57,13 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
         viewModelScope.launch {
-            networkMonitor.online.collect { online -> mutableState.update { it.copy(isOnline = online) } }
+            networkMonitor.online.collect { online ->
+                val before = state.value
+                mutableState.update { it.copy(isOnline = online) }
+                if (online && !before.isOnline && before.phase == SessionPhase.Error && before.settings.isComplete) {
+                    testConnection()
+                }
+            }
         }
     }
 
@@ -64,8 +73,27 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     fun openSettings() = mutableState.update { it.copy(settingsOpen = true) }
     fun closeSettings() = mutableState.update { it.copy(settingsOpen = false) }
-    fun openHistory() = mutableState.update { it.copy(historyOpen = true) }
-    fun closeHistory() = mutableState.update { it.copy(historyOpen = false) }
+    fun openHistory() = mutableState.update { it.copy(historyOpen = true, selectedHistoryId = null) }
+    fun closeHistory() {
+        stopPlayback()
+        mutableState.update { it.copy(historyOpen = false, selectedHistoryId = null) }
+    }
+
+    fun selectHistorySession(id: Long) {
+        stopPlayback()
+        val turn = state.value.turns.firstOrNull { it.id == id } ?: return
+        mutableState.update {
+            it.copy(
+                selectedHistoryId = id,
+                playback = PlaybackState(sessionId = id, durationMillis = turn.durationMillis),
+            )
+        }
+    }
+
+    fun closeHistorySession() {
+        stopPlayback()
+        mutableState.update { it.copy(selectedHistoryId = null) }
+    }
 
     fun saveSettings(settings: AppSettings) {
         viewModelScope.launch {
@@ -76,7 +104,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     fun clearHistory() {
         if (!state.value.isActive) {
-            mutableState.update { it.copy(turns = emptyList()) }
+            stopPlayback()
+            mutableState.update { it.copy(turns = emptyList(), selectedHistoryId = null) }
             viewModelScope.launch(Dispatchers.IO) { history.clear() }
         }
     }
@@ -93,20 +122,81 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    fun playRecording(turn: TranslationTurn) {
+    fun togglePlayback(turn: TranslationTurn) {
         val path = turn.audioPath ?: return
-        mediaPlayer?.release()
-        mediaPlayer = runCatching {
+        val current = mediaPlayer
+        if (current != null && state.value.playback.sessionId == turn.id) {
+            if (current.isPlaying) current.pause() else current.start()
+            mutableState.update { it.copy(playback = it.playback.copy(isPlaying = current.isPlaying)) }
+            if (current.isPlaying) startPlaybackProgress()
+            return
+        }
+        stopPlayback()
+        runCatching {
             MediaPlayer().apply {
                 setDataSource(path)
                 prepare()
+                playbackParams = PlaybackParams().setSpeed(state.value.playback.speed)
                 setOnCompletionListener {
-                    it.release()
-                    if (mediaPlayer === it) mediaPlayer = null
+                    mutableState.update { currentState ->
+                        currentState.copy(
+                            playback = currentState.playback.copy(
+                                isPlaying = false,
+                                positionMillis = currentState.playback.durationMillis,
+                            ),
+                        )
+                    }
                 }
                 start()
             }
-        }.getOrNull()
+        }.onSuccess { player ->
+            mediaPlayer = player
+            mutableState.update {
+                it.copy(
+                    playback = PlaybackState(
+                        sessionId = turn.id,
+                        isPlaying = true,
+                        durationMillis = player.duration.toLong(),
+                        speed = it.playback.speed,
+                    ),
+                )
+            }
+            startPlaybackProgress()
+        }.onFailure { debugLog.write("ERROR", "Could not play saved session", it) }
+    }
+
+    fun seekPlayback(positionMillis: Long) {
+        val duration = state.value.playback.durationMillis
+        val position = positionMillis.coerceIn(0, duration)
+        mediaPlayer?.seekTo(position.toInt())
+        mutableState.update { it.copy(playback = it.playback.copy(positionMillis = position)) }
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        mediaPlayer?.let { player ->
+            runCatching { player.playbackParams = player.playbackParams.setSpeed(speed) }
+        }
+        mutableState.update { it.copy(playback = it.playback.copy(speed = speed)) }
+    }
+
+    private fun startPlaybackProgress() {
+        playbackJob?.cancel()
+        playbackJob = viewModelScope.launch {
+            while (mediaPlayer?.isPlaying == true) {
+                val position = mediaPlayer?.currentPosition?.toLong() ?: break
+                mutableState.update { it.copy(playback = it.playback.copy(positionMillis = position, isPlaying = true)) }
+                delay(200)
+            }
+            mutableState.update { it.copy(playback = it.playback.copy(isPlaying = mediaPlayer?.isPlaying == true)) }
+        }
+    }
+
+    private fun stopPlayback() {
+        playbackJob?.cancel()
+        playbackJob = null
+        mediaPlayer?.release()
+        mediaPlayer = null
+        mutableState.update { it.copy(playback = PlaybackState()) }
     }
 
     fun startTalking() {
@@ -116,11 +206,9 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             mutableState.update { it.copy(settingsOpen = true) }
             return
         }
-        if (!snapshot.isOnline) {
-            debugLog.write("WARN", "Translation start rejected while offline")
-            mutableState.update { it.copy(phase = SessionPhase.Error, error = "Offline · check your network connection") }
-            return
-        }
+        // ConnectivityManager can report a VPN as unvalidated even while Qwen is reachable.
+        // The WebSocket connection is the source of truth, so always allow a real attempt.
+        networkMonitor.refreshNow()
 
         val channel = Channel<ByteArray>(Channel.UNLIMITED)
         val conversationId = System.currentTimeMillis()
@@ -145,6 +233,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 scope = viewModelScope,
                 sampleRate = snapshot.settings.sampleRate,
                 chunkMilliseconds = snapshot.settings.chunkMilliseconds,
+                mode = snapshot.settings.microphoneMode,
+                onDiagnostic = { debugLog.write("INFO", it) },
                 onAudio = {
                     capture?.appendAudio(it)
                     channel.trySend(it)
@@ -158,18 +248,28 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         sessionJob = viewModelScope.launch {
-            val sessions = createSessions(snapshot, capture)
+            var sessions = emptyList<QwenRealtimeSession>()
             try {
-                debugLog.write("INFO", "Starting ${snapshot.settings.translationMode.name} with ${sessions.size} session(s)")
-                coroutineScope { sessions.map { async { it.connect() } }.awaitAll() }
-                debugLog.write("INFO", "Qwen session(s) connected")
+                sessions = connectSessionsWithRetry(snapshot, capture)
                 mutableState.update {
-                    if (it.phase == SessionPhase.Connecting) it.copy(phase = SessionPhase.Listening) else it
+                    if (it.phase == SessionPhase.Connecting) it.copy(phase = SessionPhase.Listening, error = null) else it
                 }
 
                 var bytesSent = 0L
                 for (chunk in channel) {
-                    sessions.forEach { it.append(chunk) }
+                    try {
+                        sessions.forEach { it.append(chunk) }
+                    } catch (error: Throwable) {
+                        debugLog.write("WARN", "Audio WebSocket interrupted; reconnecting", error)
+                        sessions.forEach(QwenRealtimeSession::close)
+                        finishPendingSegment()
+                        mutableState.update {
+                            it.copy(phase = SessionPhase.Connecting, error = "Connection interrupted · reconnecting…")
+                        }
+                        sessions = connectSessionsWithRetry(snapshot, capture)
+                        mutableState.update { it.copy(phase = SessionPhase.Listening, error = null, isOnline = true) }
+                        sessions.forEach { it.append(chunk) }
+                    }
                     bytesSent += chunk.size
                 }
 
@@ -191,6 +291,36 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 sessions.forEach(QwenRealtimeSession::close)
             }
         }
+    }
+
+    private suspend fun connectSessionsWithRetry(
+        snapshot: TranslationUiState,
+        capture: TurnCapture?,
+    ): List<QwenRealtimeSession> {
+        var lastError: Throwable? = null
+        repeat(3) { index ->
+            val attempt = index + 1
+            val sessions = createSessions(snapshot, capture)
+            try {
+                debugLog.write(
+                    "INFO",
+                    "Connecting ${snapshot.settings.translationMode.name} with ${sessions.size} stream(s), attempt $attempt/3",
+                )
+                coroutineScope { sessions.map { async { it.connect() } }.awaitAll() }
+                debugLog.write("INFO", "Qwen session(s) connected")
+                return sessions
+            } catch (error: Throwable) {
+                lastError = error
+                sessions.forEach(QwenRealtimeSession::close)
+                if (attempt < 3) {
+                    mutableState.update {
+                        it.copy(error = "Could not connect · retrying ${attempt + 1}/3…")
+                    }
+                    delay(400L * attempt)
+                }
+            }
+        }
+        throw lastError ?: IOException("Could not connect")
     }
 
     private fun createSessions(
@@ -336,6 +466,15 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             sourceLanguage = segments.mapNotNull(TranslationTurn::sourceLanguage).distinct().joinToString("/").ifBlank { null },
             targetLanguage = segments.map(TranslationTurn::targetLanguage).distinct().joinToString("/"),
             createdAtMillis = id,
+            segments = segments.map {
+                TranslationSegment(
+                    id = it.id,
+                    sourceText = it.sourceText,
+                    translationText = it.translationText,
+                    sourceLanguage = it.sourceLanguage,
+                    targetLanguage = it.targetLanguage,
+                )
+            },
         )
         val saved = if (capture == null) archived else withContext(Dispatchers.IO) { capture.complete(archived) }
         mutableState.update { it.copy(turns = it.turns + saved) }
@@ -366,7 +505,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 session.finish()
                 session.awaitFinished()
                 mutableState.update {
-                    it.copy(phase = SessionPhase.Idle, connectionTestResult = "Connected · ${latency} ms")
+                    it.copy(phase = SessionPhase.Idle, connectionTestResult = "Connected · ${latency} ms", isOnline = true, error = null)
                 }
             } catch (error: Throwable) {
                 mutableState.update {
@@ -376,6 +515,12 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 session?.close()
             }
         }
+    }
+
+    fun forceRetry() {
+        debugLog.write("INFO", "User forced connection retry")
+        networkMonitor.refreshNow()
+        testConnection()
     }
 
     private fun showError(error: Throwable) {
@@ -397,6 +542,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         sessionJob?.cancel()
         testJob?.cancel()
         mediaPlayer?.release()
+        playbackJob?.cancel()
         networkMonitor.close()
     }
 }

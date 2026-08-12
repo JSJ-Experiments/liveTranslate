@@ -32,6 +32,11 @@ class SettingsRepository(private val context: Context) {
             translationMode = runCatching {
                 TranslationMode.valueOf(preferences[TRANSLATION_MODE] ?: TranslationMode.DualEnglishChinese.name)
             }.getOrDefault(TranslationMode.DualEnglishChinese),
+            microphoneMode = runCatching {
+                MicrophoneMode.valueOf(preferences[MICROPHONE_MODE] ?: MicrophoneMode.Speech.name)
+            }.getOrDefault(MicrophoneMode.Speech),
+            vadSilenceMilliseconds = preferences[VAD_SILENCE]?.toIntOrNull()
+                ?.takeIf { it in setOf(400, 700, 1200) } ?: 700,
         )
     }
 
@@ -48,6 +53,8 @@ class SettingsRepository(private val context: Context) {
             preferences[TRIGGER_MODE] = settings.triggerMode.name
             preferences[SAVE_HISTORY] = settings.saveHistory
             preferences[TRANSLATION_MODE] = settings.translationMode.name
+            preferences[MICROPHONE_MODE] = settings.microphoneMode.name
+            preferences[VAD_SILENCE] = settings.vadSilenceMilliseconds.toString()
         }
     }
 
@@ -62,6 +69,8 @@ class SettingsRepository(private val context: Context) {
         val TRIGGER_MODE = stringPreferencesKey("trigger_mode")
         val SAVE_HISTORY = booleanPreferencesKey("save_history")
         val TRANSLATION_MODE = stringPreferencesKey("translation_mode")
+        val MICROPHONE_MODE = stringPreferencesKey("microphone_mode")
+        val VAD_SILENCE = stringPreferencesKey("vad_silence_ms")
     }
 }
 

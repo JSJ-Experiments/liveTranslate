@@ -74,16 +74,39 @@ enum class TriggerMode(val label: String) {
 
 enum class TranslationMode(val label: String, val description: String) {
     DualEnglishChinese(
-        "Reliable English ↔ Chinese",
-        "Two parallel target streams. Most reliable automatic direction; roughly doubles audio input usage.",
+        "Automatic EN ↔ 中文 · 2 streams",
+        "Fixed to English and Chinese because Qwen's same-language skip is documented only for this pair. Roughly doubles audio input usage.",
     ),
     DetectedPair(
-        "Auto source → Language B",
-        "One stream with automatic source detection and one fixed target. Cheaper than two-way mode.",
+        "Auto source → one target",
+        "One stream detects the spoken language and translates into your selected target. Cheaper than two-way mode.",
     ),
-    ManualForward("Language A → B", "One stream with a fixed direction."),
-    ManualReverse("Language B → A", "One stream with a fixed direction."),
+    ManualForward("Fixed A → B", "One stream with an explicitly selected source and target."),
+    ManualReverse("Fixed B → A", "One stream with the selected pair reversed."),
 }
+
+enum class MicrophoneMode(val label: String, val description: String) {
+    Speech(
+        "Speech recognition · recommended",
+        "Prioritizes Android's speech-recognition processing and lets Xiaomi route its microphone array.",
+    ),
+    Communication(
+        "Speakerphone / noisy room",
+        "Uses voice-communication echo and noise processing; useful while the phone is playing sound.",
+    ),
+    Unprocessed(
+        "Raw / unprocessed",
+        "Avoids speech processing when supported. Mainly useful for comparison and debugging.",
+    ),
+}
+
+data class TranslationSegment(
+    val id: Long,
+    val sourceText: String,
+    val translationText: String,
+    val sourceLanguage: String?,
+    val targetLanguage: String,
+)
 
 data class TranslationTurn(
     val id: Long,
@@ -93,6 +116,8 @@ data class TranslationTurn(
     val targetLanguage: String,
     val createdAtMillis: Long = System.currentTimeMillis(),
     val audioPath: String? = null,
+    val durationMillis: Long = 0,
+    val segments: List<TranslationSegment> = emptyList(),
 )
 
 enum class Region(val hostPart: String, val label: String) {
@@ -112,6 +137,8 @@ data class AppSettings(
     val triggerMode: TriggerMode = TriggerMode.Hold,
     val saveHistory: Boolean = true,
     val translationMode: TranslationMode = TranslationMode.DualEnglishChinese,
+    val microphoneMode: MicrophoneMode = MicrophoneMode.Speech,
+    val vadSilenceMilliseconds: Int = 700,
 ) {
     val isComplete: Boolean get() = apiKey.isNotBlank() && workspaceId.isNotBlank()
 }
@@ -142,7 +169,17 @@ data class TranslationUiState(
     val settingsLoaded: Boolean = false,
     val connectionTestResult: String? = null,
     val isOnline: Boolean = true,
+    val selectedHistoryId: Long? = null,
+    val playback: PlaybackState = PlaybackState(),
 ) {
     val isActive: Boolean
         get() = phase != SessionPhase.Idle && phase != SessionPhase.Error
 }
+
+data class PlaybackState(
+    val sessionId: Long? = null,
+    val isPlaying: Boolean = false,
+    val positionMillis: Long = 0,
+    val durationMillis: Long = 0,
+    val speed: Float = 1f,
+)
