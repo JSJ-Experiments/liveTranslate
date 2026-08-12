@@ -214,6 +214,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
         val channel = Channel<ByteArray>(Channel.UNLIMITED)
         val conversationId = System.currentTimeMillis()
+        val sessionSegmentStartIndex = snapshot.liveTurns.size
         val capture = if (snapshot.settings.saveHistory) {
             runCatching { history.begin(conversationId, snapshot.settings.sampleRate) }.getOrNull()
         } else null
@@ -222,7 +223,6 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         mutableState.update {
             it.copy(
                 phase = SessionPhase.Connecting,
-                liveTurns = emptyList(),
                 sourceText = "",
                 translationText = "",
                 detectedSourceLanguage = null,
@@ -283,9 +283,12 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 sessions.forEach(QwenRealtimeSession::finish)
                 coroutineScope { sessions.map { async { it.awaitFinished() } }.awaitAll() }
                 finishPendingSegment()
-                archiveConversation(conversationId, snapshot, capture)
+                archiveConversation(conversationId, capture, sessionSegmentStartIndex)
                 mutableState.update { it.copy(phase = SessionPhase.Idle, error = null) }
-                debugLog.write("INFO", "Translation session finished with ${state.value.liveTurns.size} segment(s)")
+                debugLog.write(
+                    "INFO",
+                    "Translation session finished with ${state.value.liveTurns.size - sessionSegmentStartIndex} new segment(s)",
+                )
             } catch (cancelled: CancellationException) {
                 capture?.discard()
                 mutableState.update { it.copy(phase = SessionPhase.Idle, error = null) }
@@ -293,7 +296,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             } catch (error: Throwable) {
                 debugLog.write("ERROR", "Translation session failed", error)
                 finishPendingSegment()
-                archiveConversation(conversationId, snapshot, capture)
+                archiveConversation(conversationId, capture, sessionSegmentStartIndex)
                 showError(error)
             } finally {
                 microphone.stop()
@@ -505,10 +508,10 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     private suspend fun archiveConversation(
         id: Long,
-        snapshot: TranslationUiState,
         capture: TurnCapture?,
+        segmentStartIndex: Int,
     ) {
-        val segments = state.value.liveTurns
+        val segments = state.value.liveTurns.drop(segmentStartIndex)
         if (segments.isEmpty()) {
             capture?.discard()
             return

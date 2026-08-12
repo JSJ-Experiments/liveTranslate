@@ -40,7 +40,7 @@ jobs:
         run: gradle --no-daemon :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
       - name: Create release files
         env:
-          VERSION: "0.5.1"
+          VERSION: "0.5.2"
         run: |
           mkdir -p release-dist
           apk="release-dist/LiveTranslate-v${VERSION}-arm64-v8a.apk"
@@ -59,7 +59,7 @@ jobs:
               app: "Live Translate",
               packageName: "com.jadenjsj.livetranslate",
               versionName: $version,
-              versionCode: 8,
+              versionCode: 9,
               buildType: "release",
               minSdk: 26,
               targetSdk: 36,
@@ -72,11 +72,11 @@ jobs:
               sourceCommit: $commit,
               buildRun: $run,
               model: "qwen3.5-livetranslate-flash-realtime",
-              notes: "Pre-release. Recording starts immediately before network connection, queues locally during outages, retries until delivery, and exposes Retry/Cancel. Qwen server VAD still splits utterances automatically."
+              notes: "Pre-release. Starting another tap/hold session preserves the visible live conversation while each start/stop remains a separate correctly scoped history session."
             }' > "$metadata"
       - uses: actions/upload-artifact@v4
         with:
-          name: LiveTranslate-v0.5.1-arm64-v8a
+          name: LiveTranslate-v0.5.2-arm64-v8a
           path: release-dist/
           if-no-files-found: error
           retention-days: 14

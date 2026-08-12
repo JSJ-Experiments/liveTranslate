@@ -10,7 +10,8 @@ A small, native push-to-talk translator using Alibaba Cloud's
   fixed-direction modes remain available in Settings.
 - Compact live source/translation segments use server VAD; completed history is
   kept on a separate screen rather than consuming interpreter space.
-  It follows new text until the user scrolls away.
+  It follows new text until the user scrolls away, and starting another tap/hold
+  session no longer clears the visible conversation.
 - Full-width hold-to-talk interaction with visible microphone glow and release-to-send.
 - Configurable hold-to-talk or tap-to-start/tap-to-send microphone interaction.
 - Optional app-private full-session WAV and target-tagged raw Qwen JSONL archive.
