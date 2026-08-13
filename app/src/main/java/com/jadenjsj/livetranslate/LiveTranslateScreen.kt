@@ -935,8 +935,13 @@ private fun SettingsSheet(
                 TranslationMode.VolcForwardText, TranslationMode.VolcReverseText,
                 TranslationMode.VolcForwardSpeech, TranslationMode.VolcReverseSpeech -> {
                     val languageOptions = if (TranslationMode.valueOf(translationMode).usesSpeechOutput) volcS2sLanguages else volcS2tLanguages
-                    LanguagePicker("Language A", primaryLanguage, languageOptions) { if (it != secondaryLanguage) primaryLanguage = it }
-                    LanguagePicker("Language B", secondaryLanguage, languageOptions) { if (it != primaryLanguage) secondaryLanguage = it }
+                    val bridgeLanguages = setOf("en", "zh")
+                    val languageAOptions = if (secondaryLanguage in bridgeLanguages) languageOptions
+                        else languageOptions.filter { it.code in bridgeLanguages }
+                    val languageBOptions = if (primaryLanguage in bridgeLanguages) languageOptions
+                        else languageOptions.filter { it.code in bridgeLanguages }
+                    LanguagePicker("Language A", primaryLanguage, languageAOptions) { if (it != secondaryLanguage) primaryLanguage = it }
+                    LanguagePicker("Language B", secondaryLanguage, languageBOptions) { if (it != primaryLanguage) secondaryLanguage = it }
                     Text(
                         "Volcengine requires one side of a fixed pair to be English or Chinese.",
                         style = MaterialTheme.typography.bodySmall,
