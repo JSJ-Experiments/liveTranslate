@@ -185,12 +185,14 @@ private fun CompactTopBar(
             Icon(
                 painterResource(R.drawable.ic_history),
                 "History",
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (state.isActive) 0.38f else 1f),
             )
         }
         IconButton(onClick = onOpenSettings, enabled = !state.isActive) {
             Icon(
                 painterResource(R.drawable.ic_settings),
                 "Settings",
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (state.isActive) 0.38f else 1f),
             )
         }
     }
@@ -400,15 +402,19 @@ private fun HistoryScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(painterResource(R.drawable.ic_back), "Back")
+                Icon(painterResource(R.drawable.ic_back), "Back", tint = MaterialTheme.colorScheme.onSurface)
             }
             Text("History", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             IconButton(onClick = onExport) {
-                Icon(painterResource(R.drawable.ic_share), "Export diagnostics")
+                Icon(painterResource(R.drawable.ic_share), "Export diagnostics", tint = MaterialTheme.colorScheme.onSurface)
             }
             IconButton(onClick = onClear, enabled = state.turns.isNotEmpty()) {
-                Icon(painterResource(R.drawable.ic_delete), "Clear history")
+                Icon(
+                    painterResource(R.drawable.ic_delete),
+                    "Clear history",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (state.turns.isEmpty()) 0.38f else 1f),
+                )
             }
         }
         if (state.turns.isEmpty()) {
@@ -499,7 +505,7 @@ private fun HistoryDetailScreen(
     ) {
         Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
-                Icon(painterResource(R.drawable.ic_back), "Back to sessions")
+                Icon(painterResource(R.drawable.ic_back), "Back to sessions", tint = MaterialTheme.colorScheme.onSurface)
             }
             Column {
                 Text("Saved session", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -559,6 +565,7 @@ private fun AudioPlayer(
                     Icon(
                         painterResource(if (playback.isPlaying) R.drawable.ic_pause else R.drawable.ic_play),
                         if (playback.isPlaying) "Pause" else "Play",
+                        tint = MaterialTheme.colorScheme.onSurface,
                     )
                 }
                 Slider(
