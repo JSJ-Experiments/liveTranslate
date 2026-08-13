@@ -74,7 +74,6 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun openSettings() = mutableState.update { it.copy(settingsOpen = true) }
-    fun closeSettings() = mutableState.update { it.copy(settingsOpen = false) }
     fun openHistory() = mutableState.update { it.copy(historyOpen = true, selectedHistoryId = null) }
     fun closeHistory() {
         stopPlayback()
@@ -97,11 +96,29 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         mutableState.update { it.copy(selectedHistoryId = null) }
     }
 
+    fun newLiveConversation() {
+        if (state.value.isActive) return
+        mutableState.update {
+            it.copy(
+                liveTurns = emptyList(),
+                sourceText = "",
+                translationText = "",
+                detectedSourceLanguage = null,
+                error = null,
+            )
+        }
+        debugLog.write("INFO", "Visible interpreter conversation cleared; saved history retained")
+    }
+
     fun saveSettings(settings: AppSettings) {
         viewModelScope.launch {
             repository.save(settings)
             mutableState.update { it.copy(settingsOpen = false, connectionTestResult = null) }
         }
+    }
+
+    fun autoSaveSettings(settings: AppSettings) {
+        viewModelScope.launch { repository.save(settings) }
     }
 
     fun clearHistory() {

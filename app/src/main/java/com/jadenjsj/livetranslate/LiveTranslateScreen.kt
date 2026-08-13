@@ -77,15 +77,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.delay
 
 @Composable
 fun LiveTranslateScreen(
     state: TranslationUiState,
     onOpenSettings: () -> Unit,
-    onCloseSettings: () -> Unit,
     onSaveSettings: (AppSettings) -> Unit,
+    onAutoSaveSettings: (AppSettings) -> Unit,
     onTestConnection: (AppSettings) -> Unit,
     onOpenHistory: () -> Unit,
+    onNewConversation: () -> Unit,
     onCloseHistory: () -> Unit,
     onClearHistory: () -> Unit,
     onExportDiagnostics: () -> Unit,
@@ -110,7 +112,10 @@ fun LiveTranslateScreen(
                 onCloseHistorySession, onTogglePlayback, onSeekPlayback, onPlaybackSpeed,
             )
         } else {
-            InterpreterScreen(state, onOpenHistory, onOpenSettings, onRetry, onCancelPending, onTalkStart, onTalkStop)
+            InterpreterScreen(
+                state, onOpenHistory, onNewConversation, onOpenSettings, onRetry,
+                onCancelPending, onTalkStart, onTalkStop,
+            )
         }
     }
 
@@ -119,8 +124,8 @@ fun LiveTranslateScreen(
             initial = state.settings,
             testResult = state.connectionTestResult,
             isTesting = state.phase == SessionPhase.Testing,
-            onDismiss = onCloseSettings,
             onSave = onSaveSettings,
+            onAutoSave = onAutoSaveSettings,
             onTest = onTestConnection,
         )
     }
@@ -130,6 +135,7 @@ fun LiveTranslateScreen(
 private fun InterpreterScreen(
     state: TranslationUiState,
     onOpenHistory: () -> Unit,
+    onNewConversation: () -> Unit,
     onOpenSettings: () -> Unit,
     onRetry: () -> Unit,
     onCancelPending: () -> Unit,
@@ -143,7 +149,7 @@ private fun InterpreterScreen(
             .navigationBarsPadding()
             .padding(horizontal = 16.dp),
     ) {
-        CompactTopBar(state, onOpenHistory, onOpenSettings)
+        CompactTopBar(state, onOpenHistory, onNewConversation, onOpenSettings)
         AttentionBanner(state, onRetry, onCancelPending)
         LiveTranscript(state, Modifier.weight(1f))
         PushToTalk(
@@ -160,6 +166,7 @@ private fun InterpreterScreen(
 private fun CompactTopBar(
     state: TranslationUiState,
     onOpenHistory: () -> Unit,
+    onNewConversation: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     Row(
@@ -181,6 +188,14 @@ private fun CompactTopBar(
                 .semantics { contentDescription = connectionDescription(state) },
         )
         Spacer(Modifier.weight(1f))
+        val canClear = !state.isActive && (state.liveTurns.isNotEmpty() || state.sourceText.isNotBlank() || state.translationText.isNotBlank())
+        IconButton(onClick = onNewConversation, enabled = canClear) {
+            Icon(
+                painterResource(R.drawable.ic_add),
+                "New conversation",
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (canClear) 1f else 0.38f),
+            )
+        }
         IconButton(onClick = onOpenHistory, enabled = !state.isActive) {
             Icon(
                 painterResource(R.drawable.ic_history),
@@ -711,23 +726,23 @@ private fun SettingsSheet(
     initial: AppSettings,
     testResult: String?,
     isTesting: Boolean,
-    onDismiss: () -> Unit,
     onSave: (AppSettings) -> Unit,
+    onAutoSave: (AppSettings) -> Unit,
     onTest: (AppSettings) -> Unit,
 ) {
-    var apiKey by rememberSaveable(initial.apiKey) { mutableStateOf(initial.apiKey) }
-    var workspaceId by rememberSaveable(initial.workspaceId) { mutableStateOf(initial.workspaceId) }
-    var regionName by rememberSaveable(initial.region.name) { mutableStateOf(initial.region.name) }
-    var sampleRate by rememberSaveable(initial.sampleRate) { mutableStateOf(initial.sampleRate) }
-    var chunkMilliseconds by rememberSaveable(initial.chunkMilliseconds) { mutableStateOf(initial.chunkMilliseconds) }
-    var hotwords by rememberSaveable(initial.hotwords) { mutableStateOf(initial.hotwords) }
-    var primaryLanguage by rememberSaveable(initial.primaryLanguage) { mutableStateOf(initial.primaryLanguage) }
-    var secondaryLanguage by rememberSaveable(initial.secondaryLanguage) { mutableStateOf(initial.secondaryLanguage) }
-    var triggerMode by rememberSaveable(initial.triggerMode.name) { mutableStateOf(initial.triggerMode.name) }
-    var translationMode by rememberSaveable(initial.translationMode.name) { mutableStateOf(initial.translationMode.name) }
-    var microphoneMode by rememberSaveable(initial.microphoneMode.name) { mutableStateOf(initial.microphoneMode.name) }
-    var vadSilenceMilliseconds by rememberSaveable(initial.vadSilenceMilliseconds) { mutableStateOf(initial.vadSilenceMilliseconds) }
-    var saveHistory by rememberSaveable(initial.saveHistory) { mutableStateOf(initial.saveHistory) }
+    var apiKey by rememberSaveable { mutableStateOf(initial.apiKey) }
+    var workspaceId by rememberSaveable { mutableStateOf(initial.workspaceId) }
+    var regionName by rememberSaveable { mutableStateOf(initial.region.name) }
+    var sampleRate by rememberSaveable { mutableStateOf(initial.sampleRate) }
+    var chunkMilliseconds by rememberSaveable { mutableStateOf(initial.chunkMilliseconds) }
+    var hotwords by rememberSaveable { mutableStateOf(initial.hotwords) }
+    var primaryLanguage by rememberSaveable { mutableStateOf(initial.primaryLanguage) }
+    var secondaryLanguage by rememberSaveable { mutableStateOf(initial.secondaryLanguage) }
+    var triggerMode by rememberSaveable { mutableStateOf(initial.triggerMode.name) }
+    var translationMode by rememberSaveable { mutableStateOf(initial.translationMode.name) }
+    var microphoneMode by rememberSaveable { mutableStateOf(initial.microphoneMode.name) }
+    var vadSilenceMilliseconds by rememberSaveable { mutableStateOf(initial.vadSilenceMilliseconds) }
+    var saveHistory by rememberSaveable { mutableStateOf(initial.saveHistory) }
     var showKey by rememberSaveable { mutableStateOf(false) }
 
     fun draft() = AppSettings(
@@ -746,8 +761,17 @@ private fun SettingsSheet(
         vadSilenceMilliseconds = vadSilenceMilliseconds,
     )
 
+    LaunchedEffect(
+        apiKey, workspaceId, regionName, sampleRate, chunkMilliseconds, hotwords,
+        primaryLanguage, secondaryLanguage, triggerMode, translationMode,
+        microphoneMode, vadSilenceMilliseconds, saveHistory,
+    ) {
+        delay(350)
+        onAutoSave(draft())
+    }
+
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { onSave(draft()) },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
@@ -762,7 +786,7 @@ private fun SettingsSheet(
         ) {
             Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(
-                "The API key is encrypted with Android Keystore and sent only to Alibaba Cloud.",
+                "Changes save automatically. The API key is encrypted with Android Keystore and sent only to Alibaba Cloud.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -922,9 +946,9 @@ private fun SettingsSheet(
             }
             Button(
                 modifier = Modifier.fillMaxWidth(),
-                enabled = apiKey.isNotBlank() && workspaceId.isNotBlank() && !isTesting,
+                enabled = !isTesting,
                 onClick = { onSave(draft()) },
-            ) { Text("Save settings") }
+            ) { Text("Done") }
         }
     }
 }

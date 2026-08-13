@@ -12,6 +12,8 @@ A small, native push-to-talk translator using Alibaba Cloud's
   kept on a separate screen rather than consuming interpreter space.
   It follows new text until the user scrolls away, and starting another tap/hold
   session no longer clears the visible conversation.
+- The toolbar + action starts a blank visible conversation without deleting any
+  saved history sessions.
 - Full-width hold-to-talk interaction with visible microphone glow and release-to-send.
 - Configurable hold-to-talk or tap-to-start/tap-to-send microphone interaction.
 - Optional app-private full-session WAV and target-tagged raw Qwen JSONL archive.
@@ -26,6 +28,7 @@ A small, native push-to-talk translator using Alibaba Cloud's
 - On-device connection test with authenticated WebSocket handshake latency.
 - In-app settings for API key, workspace, Beijing/Singapore region, 8/16 kHz
   capture, 40/100/200 ms packets, and translation hotwords.
+- Settings auto-save after edits and are also flushed when the sheet is dismissed.
 - The API key is AES-256-GCM encrypted with a non-exportable Android Keystore
   key. It is never baked into the APK or build output.
 

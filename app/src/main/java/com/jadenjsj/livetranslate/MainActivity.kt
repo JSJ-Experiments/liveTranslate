@@ -31,10 +31,11 @@ class MainActivity : ComponentActivity() {
                 LiveTranslateScreen(
                     state = state,
                     onOpenSettings = viewModel::openSettings,
-                    onCloseSettings = viewModel::closeSettings,
                     onSaveSettings = viewModel::saveSettings,
+                    onAutoSaveSettings = viewModel::autoSaveSettings,
                     onTestConnection = viewModel::testConnection,
                     onOpenHistory = viewModel::openHistory,
+                    onNewConversation = viewModel::newLiveConversation,
                     onCloseHistory = viewModel::closeHistory,
                     onClearHistory = viewModel::clearHistory,
                     onExportDiagnostics = viewModel::exportDiagnostics,
