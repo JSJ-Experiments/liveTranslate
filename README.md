@@ -20,6 +20,9 @@ WebSocket transports for Qwen, OpenAI, and Volcengine.
   session no longer clears the visible conversation.
 - The toolbar + action starts a blank visible conversation without deleting any
   saved history sessions.
+- Android system Back follows the in-app hierarchy (session detail → history →
+  interpreter), while forward and pop navigation use directional Material-style
+  transitions. At the interpreter root, Back remains owned by Android's system.
 - Full-width hold-to-talk interaction with visible microphone glow and release-to-send.
 - Configurable hold-to-talk or tap-to-start/tap-to-send microphone interaction.
 - Optional app-private full-session WAV and provider-tagged raw event archive.

@@ -1,11 +1,17 @@
 package com.jadenjsj.livetranslate
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -101,21 +107,53 @@ fun LiveTranslateScreen(
     onTalkStart: () -> Unit,
     onTalkStop: () -> Unit,
 ) {
+    BackHandler(
+        enabled = state.historyOpen && !state.settingsOpen,
+    ) {
+        if (state.selectedHistoryId != null) onCloseHistorySession() else onCloseHistory()
+    }
+
     Box(
         Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
-        if (state.historyOpen) {
-            HistoryScreen(
-                state, onCloseHistory, onClearHistory, onExportDiagnostics, onSelectHistory,
-                onCloseHistorySession, onTogglePlayback, onSeekPlayback, onPlaybackSpeed,
-            )
-        } else {
-            InterpreterScreen(
-                state, onOpenHistory, onNewConversation, onOpenSettings, onRetry,
-                onCancelPending, onTalkStart, onTalkStop,
-            )
+        AnimatedContent(
+            targetState = if (state.historyOpen) RootScreen.History else RootScreen.Interpreter,
+            modifier = Modifier.fillMaxSize(),
+            transitionSpec = {
+                if (targetState == RootScreen.History) {
+                    (slideIntoContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                        animationSpec = tween(300),
+                    ) + fadeIn(tween(220))) togetherWith
+                        (slideOutOfContainer(
+                            towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                            animationSpec = tween(300),
+                        ) + fadeOut(tween(180)))
+                } else {
+                    (slideIntoContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.End,
+                        animationSpec = tween(300),
+                    ) + fadeIn(tween(220))) togetherWith
+                        (slideOutOfContainer(
+                            towards = AnimatedContentTransitionScope.SlideDirection.End,
+                            animationSpec = tween(300),
+                        ) + fadeOut(tween(180)))
+                }
+            },
+            label = "root navigation",
+        ) { screen ->
+            when (screen) {
+                RootScreen.History -> HistoryScreen(
+                    state, onCloseHistory, onClearHistory, onExportDiagnostics, onSelectHistory,
+                    onCloseHistorySession, onTogglePlayback, onSeekPlayback, onPlaybackSpeed,
+                )
+                RootScreen.Interpreter -> InterpreterScreen(
+                    state, onOpenHistory, onNewConversation, onOpenSettings, onRetry,
+                    onCancelPending, onTalkStart, onTalkStop,
+                )
+            }
         }
     }
 
@@ -130,6 +168,8 @@ fun LiveTranslateScreen(
         )
     }
 }
+
+private enum class RootScreen { Interpreter, History }
 
 @Composable
 private fun InterpreterScreen(
@@ -392,17 +432,61 @@ private fun HistoryScreen(
     onPlaybackSpeed: (Float) -> Unit,
 ) {
     val selected = state.selectedHistoryId?.let { id -> state.turns.firstOrNull { it.id == id } }
-    if (selected != null) {
-        HistoryDetailScreen(
-            turn = selected,
-            playback = state.playback,
-            onBack = onCloseSession,
-            onTogglePlayback = { onTogglePlayback(selected) },
-            onSeekPlayback = onSeekPlayback,
-            onPlaybackSpeed = onPlaybackSpeed,
+    AnimatedContent(
+        targetState = selected,
+        modifier = Modifier.fillMaxSize(),
+        contentKey = { it?.id ?: Long.MIN_VALUE },
+        transitionSpec = {
+            if (targetState != null) {
+                (slideIntoContainer(
+                    towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                    animationSpec = tween(280),
+                ) + fadeIn(tween(200))) togetherWith
+                    (slideOutOfContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                        animationSpec = tween(280),
+                    ) + fadeOut(tween(160)))
+            } else {
+                (slideIntoContainer(
+                    towards = AnimatedContentTransitionScope.SlideDirection.End,
+                    animationSpec = tween(280),
+                ) + fadeIn(tween(200))) togetherWith
+                    (slideOutOfContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.End,
+                        animationSpec = tween(280),
+                    ) + fadeOut(tween(160)))
+            }
+        },
+        label = "history navigation",
+    ) {
+        selectedTurn ->
+        if (selectedTurn != null) {
+            HistoryDetailScreen(
+                turn = selectedTurn,
+                playback = state.playback,
+                onBack = onCloseSession,
+                onTogglePlayback = { onTogglePlayback(selectedTurn) },
+                onSeekPlayback = onSeekPlayback,
+                onPlaybackSpeed = onPlaybackSpeed,
+            )
+        } else HistoryListScreen(
+            turns = state.turns,
+            onBack = onBack,
+            onClear = onClear,
+            onExport = onExport,
+            onSelect = onSelect,
         )
-        return
     }
+}
+
+@Composable
+private fun HistoryListScreen(
+    turns: List<TranslationTurn>,
+    onBack: () -> Unit,
+    onClear: () -> Unit,
+    onExport: () -> Unit,
+    onSelect: (Long) -> Unit,
+) {
     Column(
         Modifier
             .fillMaxSize()
@@ -424,15 +508,15 @@ private fun HistoryScreen(
             IconButton(onClick = onExport) {
                 Icon(painterResource(R.drawable.ic_share), "Export diagnostics", tint = MaterialTheme.colorScheme.onSurface)
             }
-            IconButton(onClick = onClear, enabled = state.turns.isNotEmpty()) {
+            IconButton(onClick = onClear, enabled = turns.isNotEmpty()) {
                 Icon(
                     painterResource(R.drawable.ic_delete),
                     "Clear history",
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (state.turns.isEmpty()) 0.38f else 1f),
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (turns.isEmpty()) 0.38f else 1f),
                 )
             }
         }
-        if (state.turns.isEmpty()) {
+        if (turns.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("No saved conversations", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -442,7 +526,7 @@ private fun HistoryScreen(
                 contentPadding = PaddingValues(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(state.turns.asReversed(), key = TranslationTurn::id) { turn ->
+                items(turns.asReversed(), key = TranslationTurn::id) { turn ->
                     HistoryItem(turn) { onSelect(turn.id) }
                 }
             }

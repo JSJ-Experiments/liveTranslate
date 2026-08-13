@@ -40,7 +40,7 @@ jobs:
         run: gradle --no-daemon :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
       - name: Create release files
         env:
-          VERSION: "0.7.0"
+          VERSION: "0.7.1"
         run: |
           mkdir -p release-dist
           apk="release-dist/LiveTranslate-v${VERSION}-arm64-v8a.apk"
@@ -63,7 +63,7 @@ jobs:
               app: "Live Translate",
               packageName: "com.jadenjsj.livetranslate",
               versionName: $version,
-              versionCode: 11,
+              versionCode: 12,
               channel: "prerelease",
               releaseTag: ("v" + $version),
               buildType: "release",
@@ -83,12 +83,12 @@ jobs:
               latestApkUrl: ($repository + "/releases/download/latest-prerelease/LiveTranslate-latest-arm64-v8a.apk"),
               providers: ["qwen", "openai", "volcengine"],
               models: ["qwen3.5-livetranslate-flash-realtime", "gpt-realtime-translate", "Seed LiveInterpret 2.0"],
-              notes: "Pre-release. Adds native GPT Realtime Translation and Volcengine Simultaneous Interpretation 2.0 transports, provider-specific modes, and full-duplex translated speech playback."
+              notes: "Pre-release. Fixes system Back navigation in History and adds Material-style forward/pop transitions for interpreter, history list, and session detail screens."
             }' > "$metadata"
           cp "$metadata" "$latest_metadata"
       - uses: actions/upload-artifact@v4
         with:
-          name: LiveTranslate-v0.7.0-arm64-v8a
+          name: LiveTranslate-v0.7.1-arm64-v8a
           path: release-dist/
           if-no-files-found: error
           retention-days: 14
