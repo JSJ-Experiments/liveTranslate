@@ -83,6 +83,30 @@ class QwenProtocolTest {
     }
 
     @Test
+    fun `dual pair can lock recognition to English and Chinese`() {
+        val englishSource = JSONObject(
+            sessionUpdate(
+                direction = TranslationDirection.Auto,
+                targetLanguage = "zh",
+                sourceLanguage = "en",
+                serverVad = true,
+                skipSameLanguage = true,
+            ),
+        ).getJSONObject("session")
+        val chineseSource = JSONObject(
+            sessionUpdate(
+                direction = TranslationDirection.Auto,
+                targetLanguage = "en",
+                sourceLanguage = "zh",
+                serverVad = true,
+                skipSameLanguage = true,
+            ),
+        ).getJSONObject("session")
+        assertEquals("en", englishSource.getJSONObject("input_audio_transcription").getString("language"))
+        assertEquals("zh", chineseSource.getJSONObject("input_audio_transcription").getString("language"))
+    }
+
+    @Test
     fun `manual direction uses the selected language pair`() {
         val settings = AppSettings(primaryLanguage = "ja", secondaryLanguage = "fr")
         val forward = JSONObject(sessionUpdate(TranslationDirection.EnglishToChinese, settings))

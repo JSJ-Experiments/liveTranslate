@@ -834,7 +834,13 @@ private fun SettingsSheet(
                 }
             }
             when (TranslationMode.valueOf(translationMode)) {
-                TranslationMode.DualEnglishChinese -> Unit
+                TranslationMode.DualEnglishChinese -> {
+                    ReadOnlySetting(
+                        "Locked source languages",
+                        "English + Chinese",
+                        "English recognition feeds the Chinese target; Chinese recognition feeds the English target. This prevents detections such as Uyghur.",
+                    )
+                }
                 TranslationMode.DetectedPair -> {
                     LanguagePicker("Translation target", secondaryLanguage) { secondaryLanguage = it }
                     Text(

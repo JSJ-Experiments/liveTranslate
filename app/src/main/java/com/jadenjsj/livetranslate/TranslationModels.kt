@@ -74,8 +74,8 @@ enum class TriggerMode(val label: String) {
 
 enum class TranslationMode(val label: String, val description: String) {
     DualEnglishChinese(
-        "Automatic EN ↔ 中文 · 2 streams",
-        "Fixed to English and Chinese because Qwen's same-language skip is documented only for this pair. Roughly doubles audio input usage.",
+        "EN ↔ 中文 · locked pair",
+        "Two target streams with source recognition forced to English and Chinese. Prevents unrelated-language detections; roughly doubles audio input usage.",
     ),
     DetectedPair(
         "Auto source → one target",

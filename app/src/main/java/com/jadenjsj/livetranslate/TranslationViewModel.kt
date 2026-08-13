@@ -367,8 +367,24 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         val settings = snapshot.settings
         return when (settings.translationMode) {
             TranslationMode.DualEnglishChinese -> listOf(
-                createSession(settings, "zh", transcribeSource = true, publishSource = true, skipSame = true, capture = capture),
-                createSession(settings, "en", transcribeSource = true, publishSource = false, skipSame = true, capture = capture),
+                createSession(
+                    settings,
+                    targetLanguage = "zh",
+                    sourceLanguage = "en",
+                    transcribeSource = true,
+                    publishSource = true,
+                    skipSame = true,
+                    capture = capture,
+                ),
+                createSession(
+                    settings,
+                    targetLanguage = "en",
+                    sourceLanguage = "zh",
+                    transcribeSource = true,
+                    publishSource = false,
+                    skipSame = true,
+                    capture = capture,
+                ),
             )
             TranslationMode.DetectedPair -> listOf(
                 createSession(
