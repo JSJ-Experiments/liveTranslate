@@ -23,7 +23,7 @@ internal class QwenRealtimeSession(
         targetLanguage = direction.targetLanguage(settings),
         sourceLanguage = direction.sourceLanguage(settings),
     ),
-) : Closeable {
+) : RealtimeTranslationSession {
     private val connected = CompletableDeferred<Unit>()
     private val finished = CompletableDeferred<Unit>()
     private val detectedLanguage = CompletableDeferred<String>()
@@ -36,7 +36,7 @@ internal class QwenRealtimeSession(
     @Volatile private var currentTargetLanguage = options.targetLanguage
     @Volatile private var pendingTranslationUpdate: CompletableDeferred<Unit>? = null
 
-    suspend fun connect() = withContext(Dispatchers.IO) {
+    override suspend fun connect() = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(buildQwenUrl(settings.workspaceId, settings.region))
             .header("Authorization", "Bearer ${settings.apiKey}")
@@ -50,7 +50,7 @@ internal class QwenRealtimeSession(
         }
     }
 
-    fun append(pcm: ByteArray) {
+    override fun append(pcm: ByteArray) {
         check(!finished.isCompleted) { "Audio connection was lost" }
         val audio = Base64.encodeToString(pcm, Base64.NO_WRAP)
         check(webSocket?.send(appendAudio(audio)) == true) { "Audio connection was lost" }
@@ -69,12 +69,12 @@ internal class QwenRealtimeSession(
         }
     }
 
-    fun finish() {
+    override fun finish() {
         finishSent = true
         check(webSocket?.send(simpleEvent("session.finish")) == true) { "Could not finish session" }
     }
 
-    suspend fun awaitFinished() {
+    override suspend fun awaitFinished() {
         withTimeout(45_000) { finished.await() }
     }
 

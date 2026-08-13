@@ -233,7 +233,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         val conversationId = System.currentTimeMillis()
         val sessionSegmentStartIndex = snapshot.liveTurns.size
         val capture = if (snapshot.settings.saveHistory) {
-            runCatching { history.begin(conversationId, snapshot.settings.sampleRate) }.getOrNull()
+            runCatching { history.begin(conversationId, snapshot.settings.effectiveSampleRate) }.getOrNull()
         } else null
 
         audioChannel = channel
@@ -250,8 +250,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         try {
             microphone.start(
                 scope = viewModelScope,
-                sampleRate = snapshot.settings.sampleRate,
-                chunkMilliseconds = snapshot.settings.chunkMilliseconds,
+                sampleRate = snapshot.settings.effectiveSampleRate,
+                chunkMilliseconds = snapshot.settings.effectiveChunkMilliseconds,
                 mode = snapshot.settings.microphoneMode,
                 onDiagnostic = { debugLog.write("INFO", it) },
                 onAudio = {
@@ -267,7 +267,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         sessionJob = viewModelScope.launch {
-            var sessions = emptyList<QwenRealtimeSession>()
+            var sessions = emptyList<RealtimeTranslationSession>()
             try {
                 sessions = connectSessionsWithRetry(snapshot, capture)
                 mutableState.update {
@@ -284,7 +284,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                         sessions.forEach { it.append(chunk) }
                     } catch (error: Throwable) {
                         debugLog.write("WARN", "Audio WebSocket interrupted; reconnecting", error)
-                        sessions.forEach(QwenRealtimeSession::close)
+                        sessions.forEach(RealtimeTranslationSession::close)
                         finishPendingSegment()
                         mutableState.update {
                             it.copy(phase = SessionPhase.Connecting, error = "Connection interrupted · reconnecting…")
@@ -297,7 +297,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 }
 
                 mutableState.update { it.copy(phase = SessionPhase.Translating) }
-                sessions.forEach(QwenRealtimeSession::finish)
+                sessions.forEach(RealtimeTranslationSession::finish)
                 coroutineScope { sessions.map { async { it.awaitFinished() } }.awaitAll() }
                 finishPendingSegment()
                 archiveConversation(conversationId, capture, sessionSegmentStartIndex)
@@ -318,7 +318,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             } finally {
                 microphone.stop()
                 audioChannel = null
-                sessions.forEach(QwenRealtimeSession::close)
+                sessions.forEach(RealtimeTranslationSession::close)
             }
         }
     }
@@ -326,7 +326,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     private suspend fun connectSessionsWithRetry(
         snapshot: TranslationUiState,
         capture: TurnCapture?,
-    ): List<QwenRealtimeSession> {
+    ): List<RealtimeTranslationSession> {
         var attempt = 0
         while (true) {
             attempt += 1
@@ -334,13 +334,13 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             try {
                 debugLog.write(
                     "INFO",
-                    "Connecting ${snapshot.settings.translationMode.name} with ${sessions.size} stream(s), attempt $attempt",
+                    "Connecting ${snapshot.settings.provider.name}/${snapshot.settings.translationMode.name} with ${sessions.size} stream(s), attempt $attempt",
                 )
                 coroutineScope { sessions.map { async { it.connect() } }.awaitAll() }
-                debugLog.write("INFO", "Qwen session(s) connected")
+                debugLog.write("INFO", "${snapshot.settings.provider.shortLabel} session(s) connected")
                 return sessions
             } catch (error: Throwable) {
-                sessions.forEach(QwenRealtimeSession::close)
+                sessions.forEach(RealtimeTranslationSession::close)
                 if (isNonRetriableConnectionError(error)) throw error
                 mutableState.update {
                     val locallySaved = it.phase == SessionPhase.Queued
@@ -357,15 +357,31 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     private fun isNonRetriableConnectionError(error: Throwable): Boolean {
         val message = generateSequence(error) { it.cause }.joinToString(" ") { it.message.orEmpty() }.lowercase()
-        return listOf("unauthorized", "invalid_api_key", "invalid api key", "401", "403", "workspace id").any(message::contains)
+        return listOf(
+            "unauthorized", "invalid_api_key", "invalid api key", "401", "403", "workspace id",
+            "45000001", "permission", "resource-id", "safety identifier",
+        ).any(message::contains)
     }
 
     private fun createSessions(
         snapshot: TranslationUiState,
         capture: TurnCapture?,
-    ): List<QwenRealtimeSession> {
+    ): List<RealtimeTranslationSession> {
         val settings = snapshot.settings
-        return when (settings.translationMode) {
+        return when (settings.provider) {
+            RealtimeProvider.Qwen -> createQwenSessions(settings, capture)
+            RealtimeProvider.OpenAI -> listOf(createOpenAiSession(settings, capture))
+            RealtimeProvider.Volcengine -> listOf(createVolcSession(settings, capture))
+        }
+    }
+
+    private fun createQwenSessions(
+        settings: AppSettings,
+        capture: TurnCapture?,
+    ): List<RealtimeTranslationSession> {
+        val mode = settings.translationMode.takeIf { it.provider == RealtimeProvider.Qwen }
+            ?: TranslationMode.DualEnglishChinese
+        return when (mode) {
             TranslationMode.DualEnglishChinese -> listOf(
                 createSession(
                     settings,
@@ -415,7 +431,77 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                     capture = capture,
                 ),
             )
+            else -> error("Unsupported Qwen mode: $mode")
         }
+    }
+
+    private fun createOpenAiSession(
+        settings: AppSettings,
+        capture: TurnCapture?,
+    ): RealtimeTranslationSession {
+        val mode = settings.translationMode.takeIf { it.provider == RealtimeProvider.OpenAI }
+            ?: TranslationMode.OpenAiForward
+        val targetLanguage = if (mode == TranslationMode.OpenAiReverse) settings.primaryLanguage else settings.secondaryLanguage
+        var streamSource = ""
+        var streamTranslation = ""
+        return OpenAiRealtimeSession(
+            settings = settings,
+            targetLanguage = targetLanguage,
+            onRawEvent = { raw -> capture?.appendServerEvent("openai:$targetLanguage", raw) },
+            onSource = { pending ->
+                streamSource = pending
+                updateSource(streamSource, null)
+            },
+            onTranslation = { pending ->
+                streamTranslation = pending
+                mutableState.update { it.copy(translationText = pending, activeTargetLanguage = targetLanguage) }
+            },
+            onSegment = { source, translation ->
+                completeSegment(source, null, translation, targetLanguage)
+                streamSource = ""
+                streamTranslation = ""
+            },
+        )
+    }
+
+    private fun createVolcSession(
+        settings: AppSettings,
+        capture: TurnCapture?,
+    ): RealtimeTranslationSession {
+        val selected = settings.translationMode.takeIf { it.provider == RealtimeProvider.Volcengine }
+            ?: TranslationMode.VolcBidirectionalText
+        val s2s = selected in setOf(
+            TranslationMode.VolcBidirectionalSpeech,
+            TranslationMode.VolcForwardSpeech,
+            TranslationMode.VolcReverseSpeech,
+        )
+        val reverse = selected in setOf(TranslationMode.VolcReverseText, TranslationMode.VolcReverseSpeech)
+        val bidirectional = selected in setOf(
+            TranslationMode.VolcBidirectionalText,
+            TranslationMode.VolcBidirectionalSpeech,
+        )
+        val sourceLanguage = if (bidirectional) "zhen" else if (reverse) settings.secondaryLanguage else settings.primaryLanguage
+        val targetLanguage = if (bidirectional) "zhen" else if (reverse) settings.primaryLanguage else settings.secondaryLanguage
+        val displayTarget = if (bidirectional) "en/zh" else targetLanguage
+        return VolcRealtimeSession(
+            settings = settings,
+            mode = if (s2s) "s2s" else "s2t",
+            sourceLanguage = sourceLanguage,
+            targetLanguage = targetLanguage,
+            onRawEvent = { raw -> capture?.appendServerEvent("volc:$displayTarget", raw) },
+            onSource = { text, _ -> updateSource(text, sourceLanguage.takeUnless { it == "zhen" }) },
+            onTranslation = { text, _ ->
+                mutableState.update { it.copy(translationText = text, activeTargetLanguage = displayTarget) }
+            },
+            onSegment = { source, translation ->
+                completeSegment(
+                    source,
+                    sourceLanguage.takeUnless { it == "zhen" },
+                    translation,
+                    displayTarget,
+                )
+            },
+        )
     }
 
     private fun createSession(
@@ -593,28 +679,36 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun testConnection(settings: AppSettings = state.value.settings) {
         if (testJob?.isActive == true || state.value.isActive) return
         if (!settings.isComplete) {
-            mutableState.update { it.copy(connectionTestResult = "Add an API key and workspace ID first") }
+            val required = when (settings.provider) {
+                RealtimeProvider.Qwen -> "Add a Qwen API key and workspace ID first"
+                RealtimeProvider.OpenAI -> "Add an OpenAI API key and safety identifier first"
+                RealtimeProvider.Volcengine -> "Add a Volcengine API key and resource ID first"
+            }
+            mutableState.update { it.copy(connectionTestResult = required) }
             return
         }
         testJob = viewModelScope.launch {
             mutableState.update { it.copy(phase = SessionPhase.Testing, connectionTestResult = "Connecting…") }
             val started = TimeSource.Monotonic.markNow()
-            var session: QwenRealtimeSession? = null
+            var sessions = emptyList<RealtimeTranslationSession>()
             try {
-                session = QwenRealtimeSession(settings, TranslationDirection.Auto, onEvent = {})
-                session.connect()
+                sessions = createSessions(state.value.copy(settings = settings), capture = null)
+                coroutineScope { sessions.map { async { it.connect() } }.awaitAll() }
                 val latency = started.elapsedNow().inWholeMilliseconds
-                session.finish()
-                session.awaitFinished()
                 mutableState.update {
-                    it.copy(phase = SessionPhase.Idle, connectionTestResult = "Connected · ${latency} ms", isOnline = true, error = null)
+                    it.copy(
+                        phase = SessionPhase.Idle,
+                        connectionTestResult = "${settings.provider.shortLabel} connected · ${latency} ms",
+                        isOnline = true,
+                        error = null,
+                    )
                 }
             } catch (error: Throwable) {
                 mutableState.update {
                     it.copy(phase = SessionPhase.Idle, connectionTestResult = friendlyMessage(error))
                 }
             } finally {
-                session?.close()
+                sessions.forEach(RealtimeTranslationSession::close)
             }
         }
     }
@@ -623,7 +717,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         debugLog.write("INFO", "User forced connection retry")
         networkMonitor.refreshNow()
         if (state.value.phase in setOf(SessionPhase.Connecting, SessionPhase.Queued)) {
-            mutableState.update { it.copy(error = "Retrying Qwen now…") }
+            mutableState.update { it.copy(error = "Retrying ${it.settings.provider.shortLabel} now…") }
             retrySignal.trySend(Unit)
             return
         }

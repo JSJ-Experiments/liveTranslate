@@ -67,23 +67,77 @@ val supportedLanguages = listOf(
     "sw" to "Swahili", "tg" to "Tajik", "az" to "Azerbaijani", "uk" to "Ukrainian",
 ).map { LanguageOption(it.first, it.second) }
 
+val volcS2tLanguages = supportedLanguages.filter { it.code in setOf(
+    "zh", "en", "de", "fr", "es", "id", "ja", "pt", "ko", "tr", "ms", "nl",
+    "ro", "pl", "cs", "ar", "th", "vi", "ru", "it",
+) }
+
+val volcS2sLanguages = supportedLanguages.filter { it.code in setOf(
+    "zh", "en", "de", "fr", "es", "id", "ja", "pt",
+) }
+
 enum class TriggerMode(val label: String) {
     Hold("Hold to talk"),
     Tap("Tap to start / stop"),
 }
 
-enum class TranslationMode(val label: String, val description: String) {
+enum class RealtimeProvider(val label: String, val shortLabel: String) {
+    Qwen("Qwen LiveTranslate", "Qwen"),
+    OpenAI("GPT Realtime Translate", "GPT"),
+    Volcengine("ByteDance / Volcengine 同声传译 2.0", "Volc"),
+}
+
+enum class TranslationMode(
+    val provider: RealtimeProvider,
+    val label: String,
+    val description: String,
+) {
     DualEnglishChinese(
+        RealtimeProvider.Qwen,
         "EN ↔ 中文 · locked pair",
         "Two target streams with source recognition forced to English and Chinese. Prevents unrelated-language detections; roughly doubles audio input usage.",
     ),
     DetectedPair(
+        RealtimeProvider.Qwen,
         "Auto source → one target",
         "One stream detects the spoken language and translates into your selected target. Cheaper than two-way mode.",
     ),
-    ManualForward("Fixed A → B", "One stream with an explicitly selected source and target."),
-    ManualReverse("Fixed B → A", "One stream with the selected pair reversed."),
+    ManualForward(RealtimeProvider.Qwen, "Fixed A → B", "One stream with an explicitly selected source and target."),
+    ManualReverse(RealtimeProvider.Qwen, "Fixed B → A", "One stream with the selected pair reversed."),
+    OpenAiForward(
+        RealtimeProvider.OpenAI,
+        "Simultaneous → B",
+        "One native simultaneous translation stream. Source speech is detected while translated text and speech stream to language B.",
+    ),
+    OpenAiReverse(
+        RealtimeProvider.OpenAI,
+        "Simultaneous → A",
+        "The same full-duplex stream with language A as the output target.",
+    ),
+    VolcBidirectionalText(
+        RealtimeProvider.Volcengine,
+        "True EN ↔ 中文 · text",
+        "One native zhen stream automatically reverses English and Chinese and returns source and translated subtitles.",
+    ),
+    VolcBidirectionalSpeech(
+        RealtimeProvider.Volcengine,
+        "True EN ↔ 中文 · speech",
+        "One full-duplex zhen S2S stream automatically reverses English and Chinese and speaks with cloned input voice.",
+    ),
+    VolcForwardText(RealtimeProvider.Volcengine, "Fixed A → B · text", "S2T simultaneous subtitles for a fixed supported pair."),
+    VolcReverseText(RealtimeProvider.Volcengine, "Fixed B → A · text", "S2T simultaneous subtitles with the selected pair reversed."),
+    VolcForwardSpeech(RealtimeProvider.Volcengine, "Fixed A → B · speech", "S2S simultaneous speech using cloned input voice."),
+    VolcReverseSpeech(RealtimeProvider.Volcengine, "Fixed B → A · speech", "S2S simultaneous speech with the selected pair reversed."),
 }
+
+val TranslationMode.usesSpeechOutput: Boolean
+    get() = this in setOf(
+        TranslationMode.OpenAiForward,
+        TranslationMode.OpenAiReverse,
+        TranslationMode.VolcBidirectionalSpeech,
+        TranslationMode.VolcForwardSpeech,
+        TranslationMode.VolcReverseSpeech,
+    )
 
 enum class MicrophoneMode(val label: String, val description: String) {
     Speech(
@@ -126,8 +180,13 @@ enum class Region(val hostPart: String, val label: String) {
 }
 
 data class AppSettings(
+    val provider: RealtimeProvider = RealtimeProvider.Qwen,
     val apiKey: String = "",
     val workspaceId: String = "",
+    val openAiApiKey: String = "",
+    val openAiSafetyIdentifier: String = "",
+    val volcApiKey: String = "",
+    val volcResourceId: String = "volc.service_type.10053",
     val region: Region = Region.Beijing,
     val sampleRate: Int = 16_000,
     val chunkMilliseconds: Int = 100,
@@ -139,8 +198,24 @@ data class AppSettings(
     val translationMode: TranslationMode = TranslationMode.DualEnglishChinese,
     val microphoneMode: MicrophoneMode = MicrophoneMode.Speech,
     val vadSilenceMilliseconds: Int = 700,
+    val playTranslatedAudio: Boolean = true,
 ) {
-    val isComplete: Boolean get() = apiKey.isNotBlank() && workspaceId.isNotBlank()
+    val isComplete: Boolean get() = when (provider) {
+        RealtimeProvider.Qwen -> apiKey.isNotBlank() && workspaceId.isNotBlank()
+        RealtimeProvider.OpenAI -> openAiApiKey.isNotBlank() && openAiSafetyIdentifier.isNotBlank()
+        RealtimeProvider.Volcengine -> volcApiKey.isNotBlank() && volcResourceId.isNotBlank()
+    }
+
+    val effectiveSampleRate: Int get() = when (provider) {
+        RealtimeProvider.Qwen -> sampleRate
+        RealtimeProvider.OpenAI -> 24_000
+        RealtimeProvider.Volcengine -> 16_000
+    }
+
+    val effectiveChunkMilliseconds: Int get() = when (provider) {
+        RealtimeProvider.Volcengine -> 80
+        else -> chunkMilliseconds
+    }
 }
 
 enum class SessionPhase {

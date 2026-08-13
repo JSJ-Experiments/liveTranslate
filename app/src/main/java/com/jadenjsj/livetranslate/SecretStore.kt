@@ -11,13 +11,13 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Encrypts the API key with a non-exportable Android Keystore key. */
+/** Encrypts provider credentials with a non-exportable Android Keystore key. */
 internal class SecretStore(context: Context) {
     private val preferences = context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
 
     @Synchronized
-    fun readApiKey(): String {
-        val encoded = preferences.getString(API_KEY, null) ?: return ""
+    fun readSecret(name: String): String {
+        val encoded = preferences.getString(keyFor(name), null) ?: return ""
         return runCatching {
             val blob = Base64.decode(encoded, Base64.NO_WRAP)
             val buffer = ByteBuffer.wrap(blob)
@@ -31,16 +31,16 @@ internal class SecretStore(context: Context) {
         }.getOrElse {
             // A restored ciphertext cannot be decrypted if its device-bound key
             // was not restored. Fail closed rather than exposing or crashing.
-            preferences.edit().remove(API_KEY).apply()
+            preferences.edit().remove(keyFor(name)).apply()
             ""
         }
     }
 
     @Synchronized
-    fun writeApiKey(value: String) {
+    fun writeSecret(name: String, value: String) {
         val normalized = value.trim()
         if (normalized.isEmpty()) {
-            preferences.edit().remove(API_KEY).apply()
+            preferences.edit().remove(keyFor(name)).apply()
             return
         }
         val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -52,9 +52,11 @@ internal class SecretStore(context: Context) {
             .put(ciphertext)
             .array()
         preferences.edit()
-            .putString(API_KEY, Base64.encodeToString(blob, Base64.NO_WRAP))
+            .putString(keyFor(name), Base64.encodeToString(blob, Base64.NO_WRAP))
             .apply()
     }
+
+    private fun keyFor(name: String) = "${name}_ciphertext"
 
     private fun getOrCreateKey(): SecretKey {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -76,7 +78,6 @@ internal class SecretStore(context: Context) {
 
     private companion object {
         const val FILE_NAME = "encrypted_credentials"
-        const val API_KEY = "api_key_ciphertext"
         const val KEY_ALIAS = "com.jadenjsj.livetranslate.api_key.v1"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
     }

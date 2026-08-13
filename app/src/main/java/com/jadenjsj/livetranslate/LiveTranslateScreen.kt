@@ -228,9 +228,9 @@ private fun connectionDescription(state: TranslationUiState): String = when {
 private fun AttentionBanner(state: TranslationUiState, onRetry: () -> Unit, onCancelPending: () -> Unit) {
     val message = when {
         state.phase == SessionPhase.Queued -> state.error ?: "Recording saved locally · waiting to send…"
-        state.phase == SessionPhase.Connecting -> state.error ?: "Recording locally · connecting to Qwen…"
+        state.phase == SessionPhase.Connecting -> state.error ?: "Recording locally · connecting to ${state.settings.provider.shortLabel}…"
         state.phase == SessionPhase.Error -> state.error ?: "Translation connection failed"
-        state.phase == SessionPhase.Testing -> "Checking the Qwen connection…"
+        state.phase == SessionPhase.Testing -> "Checking the ${state.settings.provider.shortLabel} connection…"
         !state.isOnline -> "Offline · you can still record and it will send after reconnection"
         else -> null
     } ?: return
@@ -732,6 +732,11 @@ private fun SettingsSheet(
 ) {
     var apiKey by rememberSaveable { mutableStateOf(initial.apiKey) }
     var workspaceId by rememberSaveable { mutableStateOf(initial.workspaceId) }
+    var providerName by rememberSaveable { mutableStateOf(initial.provider.name) }
+    var openAiApiKey by rememberSaveable { mutableStateOf(initial.openAiApiKey) }
+    var openAiSafetyIdentifier by rememberSaveable { mutableStateOf(initial.openAiSafetyIdentifier) }
+    var volcApiKey by rememberSaveable { mutableStateOf(initial.volcApiKey) }
+    var volcResourceId by rememberSaveable { mutableStateOf(initial.volcResourceId) }
     var regionName by rememberSaveable { mutableStateOf(initial.region.name) }
     var sampleRate by rememberSaveable { mutableStateOf(initial.sampleRate) }
     var chunkMilliseconds by rememberSaveable { mutableStateOf(initial.chunkMilliseconds) }
@@ -739,15 +744,26 @@ private fun SettingsSheet(
     var primaryLanguage by rememberSaveable { mutableStateOf(initial.primaryLanguage) }
     var secondaryLanguage by rememberSaveable { mutableStateOf(initial.secondaryLanguage) }
     var triggerMode by rememberSaveable { mutableStateOf(initial.triggerMode.name) }
-    var translationMode by rememberSaveable { mutableStateOf(initial.translationMode.name) }
+    var translationMode by rememberSaveable {
+        mutableStateOf(
+            initial.translationMode.takeIf { it.provider == initial.provider }?.name
+                ?: defaultMode(initial.provider).name,
+        )
+    }
     var microphoneMode by rememberSaveable { mutableStateOf(initial.microphoneMode.name) }
     var vadSilenceMilliseconds by rememberSaveable { mutableStateOf(initial.vadSilenceMilliseconds) }
     var saveHistory by rememberSaveable { mutableStateOf(initial.saveHistory) }
+    var playTranslatedAudio by rememberSaveable { mutableStateOf(initial.playTranslatedAudio) }
     var showKey by rememberSaveable { mutableStateOf(false) }
 
     fun draft() = AppSettings(
+        provider = RealtimeProvider.valueOf(providerName),
         apiKey = apiKey,
         workspaceId = workspaceId,
+        openAiApiKey = openAiApiKey,
+        openAiSafetyIdentifier = openAiSafetyIdentifier,
+        volcApiKey = volcApiKey,
+        volcResourceId = volcResourceId,
         region = Region.valueOf(regionName),
         sampleRate = sampleRate,
         chunkMilliseconds = chunkMilliseconds,
@@ -759,12 +775,14 @@ private fun SettingsSheet(
         translationMode = TranslationMode.valueOf(translationMode),
         microphoneMode = MicrophoneMode.valueOf(microphoneMode),
         vadSilenceMilliseconds = vadSilenceMilliseconds,
+        playTranslatedAudio = playTranslatedAudio,
     )
 
     LaunchedEffect(
-        apiKey, workspaceId, regionName, sampleRate, chunkMilliseconds, hotwords,
+        providerName, apiKey, workspaceId, openAiApiKey, openAiSafetyIdentifier,
+        volcApiKey, volcResourceId, regionName, sampleRate, chunkMilliseconds, hotwords,
         primaryLanguage, secondaryLanguage, triggerMode, translationMode,
-        microphoneMode, vadSilenceMilliseconds, saveHistory,
+        microphoneMode, vadSilenceMilliseconds, saveHistory, playTranslatedAudio,
     ) {
         delay(350)
         onAutoSave(draft())
@@ -786,39 +804,84 @@ private fun SettingsSheet(
         ) {
             Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(
-                "Changes save automatically. The API key is encrypted with Android Keystore and sent only to Alibaba Cloud.",
+                "Changes save automatically. Provider keys are separately encrypted with Android Keystore and sent only to the selected provider.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            SectionLabel("MODEL STUDIO · DASHSCOPE")
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("API key") },
-                singleLine = true,
-                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Hide" else "Show") } },
-            )
-            OutlinedTextField(
-                value = workspaceId,
-                onValueChange = { workspaceId = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Workspace ID") },
-                singleLine = true,
-            )
-            Text("Region", style = MaterialTheme.typography.labelLarge)
-            ChoiceRow(Region.entries.map { it.name to it.label }, regionName) { regionName = it }
-            ReadOnlySetting("Model", "qwen3.5-livetranslate-flash-realtime")
+            SectionLabel("PROVIDER")
+            RealtimeProvider.entries.forEach { provider ->
+                val selected = providerName == provider.name
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        providerName = provider.name
+                        translationMode = defaultMode(provider).name
+                    },
+                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                    contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Text(provider.label, Modifier.padding(14.dp), fontWeight = FontWeight.SemiBold)
+                }
+            }
+            when (RealtimeProvider.valueOf(providerName)) {
+                RealtimeProvider.Qwen -> {
+                    SectionLabel("MODEL STUDIO · DASHSCOPE")
+                    SecretField("API key", apiKey, showKey, { apiKey = it }, { showKey = !showKey })
+                    OutlinedTextField(
+                        value = workspaceId,
+                        onValueChange = { workspaceId = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Workspace ID") },
+                        singleLine = true,
+                    )
+                    Text("Region", style = MaterialTheme.typography.labelLarge)
+                    ChoiceRow(Region.entries.map { it.name to it.label }, regionName) { regionName = it }
+                    ReadOnlySetting("Model", "qwen3.5-livetranslate-flash-realtime")
+                }
+                RealtimeProvider.OpenAI -> {
+                    SectionLabel("OPENAI")
+                    SecretField("OpenAI API key", openAiApiKey, showKey, { openAiApiKey = it }, { showKey = !showKey })
+                    OutlinedTextField(
+                        value = openAiSafetyIdentifier,
+                        onValueChange = { openAiSafetyIdentifier = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Safety identifier") },
+                        supportingText = { Text("Stable pseudonymous SHA-256 ID required by the Translation API") },
+                        singleLine = true,
+                    )
+                    ReadOnlySetting("Model", "gpt-realtime-translate", "Native simultaneous source transcription plus translated text and PCM speech.")
+                }
+                RealtimeProvider.Volcengine -> {
+                    SectionLabel("VOLCENGINE · 豆包语音")
+                    SecretField("Volcengine API key", volcApiKey, showKey, { volcApiKey = it }, { showKey = !showKey })
+                    OutlinedTextField(
+                        value = volcResourceId,
+                        onValueChange = { volcResourceId = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Resource ID") },
+                        supportingText = { Text("Official AST 2.0 value: volc.service_type.10053") },
+                        singleLine = true,
+                    )
+                    ReadOnlySetting("Model", "Seed LiveInterpret 2.0", "Direct AST WebSocket; supports native zhen bidirectional mode.")
+                }
+            }
 
             HorizontalDivider()
             SectionLabel("TRANSLATION")
             Text("Mode", style = MaterialTheme.typography.labelLarge)
-            TranslationMode.entries.forEach { mode ->
+            val selectedProvider = RealtimeProvider.valueOf(providerName)
+            TranslationMode.entries.filter { it.provider == selectedProvider }.forEach { mode ->
                 val selected = translationMode == mode.name
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    onClick = { translationMode = mode.name },
+                    onClick = {
+                        translationMode = mode.name
+                        if (mode in setOf(TranslationMode.VolcForwardSpeech, TranslationMode.VolcReverseSpeech)) {
+                            if (primaryLanguage !in volcS2sLanguages.map { it.code }) primaryLanguage = "en"
+                            if (secondaryLanguage !in volcS2sLanguages.map { it.code }) secondaryLanguage = "zh"
+                        }
+                    },
                     color = if (selected) MaterialTheme.colorScheme.primaryContainer
                     else MaterialTheme.colorScheme.surfaceContainer,
                     shape = RoundedCornerShape(14.dp),
@@ -850,19 +913,48 @@ private fun SettingsSheet(
                     )
                 }
                 TranslationMode.ManualForward, TranslationMode.ManualReverse -> {
-                LanguagePicker("Language A", primaryLanguage) { if (it != secondaryLanguage) primaryLanguage = it }
-                LanguagePicker("Language B", secondaryLanguage) { if (it != primaryLanguage) secondaryLanguage = it }
+                    LanguagePicker("Language A", primaryLanguage) { if (it != secondaryLanguage) primaryLanguage = it }
+                    LanguagePicker("Language B", secondaryLanguage) { if (it != primaryLanguage) secondaryLanguage = it }
+                }
+                TranslationMode.OpenAiForward, TranslationMode.OpenAiReverse -> {
+                    LanguagePicker("Language A", primaryLanguage) { if (it != secondaryLanguage) primaryLanguage = it }
+                    LanguagePicker("Language B", secondaryLanguage) { if (it != primaryLanguage) secondaryLanguage = it }
+                    Text(
+                        "GPT uses one full-duplex stream with a fixed output target. Pick → B or → A above; source transcription remains automatic.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TranslationMode.VolcBidirectionalText, TranslationMode.VolcBidirectionalSpeech -> {
+                    ReadOnlySetting(
+                        "Automatic pair",
+                        "English ↔ Chinese · zhen",
+                        "One native stream detects English/Chinese and reverses the translation direction without reconnecting.",
+                    )
+                }
+                TranslationMode.VolcForwardText, TranslationMode.VolcReverseText,
+                TranslationMode.VolcForwardSpeech, TranslationMode.VolcReverseSpeech -> {
+                    val languageOptions = if (TranslationMode.valueOf(translationMode).usesSpeechOutput) volcS2sLanguages else volcS2tLanguages
+                    LanguagePicker("Language A", primaryLanguage, languageOptions) { if (it != secondaryLanguage) primaryLanguage = it }
+                    LanguagePicker("Language B", secondaryLanguage, languageOptions) { if (it != primaryLanguage) secondaryLanguage = it }
+                    Text(
+                        "Volcengine requires one side of a fixed pair to be English or Chinese.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
-            OutlinedTextField(
-                value = hotwords,
-                onValueChange = { hotwords = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Hotwords (optional)") },
-                placeholder = { Text("Qwen=千问\nVPN=虚拟专用网络") },
-                minLines = 2,
-                supportingText = { Text("One source=translation pair per line") },
-            )
+            if (selectedProvider == RealtimeProvider.Qwen) {
+                OutlinedTextField(
+                    value = hotwords,
+                    onValueChange = { hotwords = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Hotwords (optional)") },
+                    placeholder = { Text("Qwen=千问\nVPN=虚拟专用网络") },
+                    minLines = 2,
+                    supportingText = { Text("One source=translation pair per line") },
+                )
+            }
 
             HorizontalDivider()
             SectionLabel("AUDIO")
@@ -892,24 +984,50 @@ private fun SettingsSheet(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text("End-of-speech silence", style = MaterialTheme.typography.labelLarge)
-            ChoiceRow(
-                listOf("400" to "400 ms · fast", "700" to "700 ms", "1200" to "1.2 s · long"),
-                vadSilenceMilliseconds.toString(),
-            ) { vadSilenceMilliseconds = it.toInt() }
-            Text(
-                "Qwen splits speech automatically with server VAD. This only controls how much silence counts as the end of an utterance; 700 ms is the balanced default.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            ReadOnlySetting("Format", "PCM 16-bit mono", "Opus remains deferred until packet interoperability is tested.")
-            Text("Quality / sample rate", style = MaterialTheme.typography.labelLarge)
-            ChoiceRow(listOf("8000" to "8 kHz · saver", "16000" to "16 kHz · best"), sampleRate.toString()) {
-                sampleRate = it.toInt()
+            if (TranslationMode.valueOf(translationMode).usesSpeechOutput) {
+                Text("Translated speech", style = MaterialTheme.typography.labelLarge)
+                ChoiceRow(
+                    listOf("true" to "Play live", "false" to "Text only / muted"),
+                    playTranslatedAudio.toString(),
+                ) { playTranslatedAudio = it.toBoolean() }
+                Text(
+                    "Use headphones or the Communication microphone preset to reduce speaker echo during full-duplex playback.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Text("Packet interval", style = MaterialTheme.typography.labelLarge)
-            ChoiceRow(listOf("40" to "40 ms", "100" to "100 ms", "200" to "200 ms"), chunkMilliseconds.toString()) {
-                chunkMilliseconds = it.toInt()
+            when (selectedProvider) {
+                RealtimeProvider.Qwen -> {
+                    Text("End-of-speech silence", style = MaterialTheme.typography.labelLarge)
+                    ChoiceRow(
+                        listOf("400" to "400 ms · fast", "700" to "700 ms", "1200" to "1.2 s · long"),
+                        vadSilenceMilliseconds.toString(),
+                    ) { vadSilenceMilliseconds = it.toInt() }
+                    Text(
+                        "Qwen splits speech automatically with server VAD. 700 ms is the balanced default.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    ReadOnlySetting("Format", "PCM 16-bit mono")
+                    Text("Quality / sample rate", style = MaterialTheme.typography.labelLarge)
+                    ChoiceRow(listOf("8000" to "8 kHz · saver", "16000" to "16 kHz · best"), sampleRate.toString()) {
+                        sampleRate = it.toInt()
+                    }
+                    Text("Packet interval", style = MaterialTheme.typography.labelLarge)
+                    ChoiceRow(listOf("40" to "40 ms", "100" to "100 ms", "200" to "200 ms"), chunkMilliseconds.toString()) {
+                        chunkMilliseconds = it.toInt()
+                    }
+                }
+                RealtimeProvider.OpenAI -> ReadOnlySetting(
+                    "Wire audio",
+                    "PCM16 mono · 24 kHz · 100 ms",
+                    "The Translation endpoint requires raw 24 kHz PCM16 input and streams 24 kHz PCM16 output.",
+                )
+                RealtimeProvider.Volcengine -> ReadOnlySetting(
+                    "Wire audio",
+                    "PCM16 mono · 16 kHz · 80 ms",
+                    "AST 2.0 requires 16 kHz source audio and recommends 80 ms packets. S2S playback uses 16 kHz PCM16.",
+                )
             }
 
             HorizontalDivider()
@@ -918,20 +1036,20 @@ private fun SettingsSheet(
                 saveHistory = it.toBoolean()
             }
             Text(
-                "Each start/stop session is saved as one full WAV plus tagged raw Qwen JSONL events. Clear History deletes all of it.",
+                "Each start/stop session is saved as one full source WAV plus provider-tagged raw events. Clear History deletes all of it.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ReadOnlySetting(
                 "Debug log",
                 "files/debug_logs/livetranslate.log",
-                "Open History and tap Export to share a ZIP containing this log, raw Qwen events, transcripts, and WAV recordings.",
+                "Open History and tap Export to share a ZIP containing this log, raw provider events, transcripts, and WAV recordings.",
             )
 
             HorizontalDivider()
             Button(
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !isTesting && apiKey.isNotBlank() && workspaceId.isNotBlank(),
+                enabled = !isTesting && draft().isComplete,
                 onClick = { onTest(draft()) },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -947,7 +1065,7 @@ private fun SettingsSheet(
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (it.startsWith("Connected")) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
+                    color = if (it.contains("connected", ignoreCase = true)) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
                 )
             }
             Button(
@@ -960,7 +1078,12 @@ private fun SettingsSheet(
 }
 
 @Composable
-private fun LanguagePicker(label: String, selectedCode: String, onSelected: (String) -> Unit) {
+private fun LanguagePicker(
+    label: String,
+    selectedCode: String,
+    options: List<LanguageOption> = supportedLanguages,
+    onSelected: (String) -> Unit,
+) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val selected = supportedLanguages.firstOrNull { it.code == selectedCode }
     Box(Modifier.fillMaxWidth()) {
@@ -973,7 +1096,7 @@ private fun LanguagePicker(label: String, selectedCode: String, onSelected: (Str
         )
         Box(Modifier.fillMaxSize().clickable { expanded = true })
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            supportedLanguages.forEach { language ->
+            options.forEach { language ->
                 DropdownMenuItem(
                     text = { Text("${language.label} · ${language.code}") },
                     onClick = {
@@ -984,6 +1107,31 @@ private fun LanguagePicker(label: String, selectedCode: String, onSelected: (Str
             }
         }
     }
+}
+
+@Composable
+private fun SecretField(
+    label: String,
+    value: String,
+    visible: Boolean,
+    onValueChange: (String) -> Unit,
+    onToggleVisibility: () -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) },
+        singleLine = true,
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = { TextButton(onClick = onToggleVisibility) { Text(if (visible) "Hide" else "Show") } },
+    )
+}
+
+private fun defaultMode(provider: RealtimeProvider): TranslationMode = when (provider) {
+    RealtimeProvider.Qwen -> TranslationMode.DualEnglishChinese
+    RealtimeProvider.OpenAI -> TranslationMode.OpenAiForward
+    RealtimeProvider.Volcengine -> TranslationMode.VolcBidirectionalText
 }
 
 @Composable
