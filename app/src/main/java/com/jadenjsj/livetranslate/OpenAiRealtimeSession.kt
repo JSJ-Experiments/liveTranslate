@@ -131,7 +131,8 @@ internal class OpenAiRealtimeSession(
 
         private fun maybeCompleteSentence() {
             val pending = translation.removePrefix(emittedTranslation)
-            if (pending.length < 8 || pending.lastOrNull() !in ".!?。！？；;\n") return
+            val finalCharacter = pending.lastOrNull() ?: return
+            if (pending.length < 8 || finalCharacter !in ".!?。！？；;\n") return
             val sourcePending = source.removePrefix(emittedSource)
             onSegment(sourcePending.trim(), pending.trim())
             emittedSource = source
@@ -157,4 +158,3 @@ internal class OpenAiRealtimeSession(
         }
     }
 }
-
