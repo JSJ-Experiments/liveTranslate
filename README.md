@@ -81,6 +81,22 @@ Model Studio key.
 - Stable application ID: `com.jadenjsj.livetranslate`
 - Stable release signing key; release assets include a machine-readable metadata JSON
 
+## Stable prerelease update URLs
+
+Update clients should fetch the rolling metadata first:
+
+```text
+https://github.com/JSJ-Experiments/liveTranslate/releases/download/latest-prerelease/LiveTranslate-latest-metadata.json
+```
+
+The metadata contains the current version code, SHA-256, byte size, source
+commit, versioned release URL, and APK URL. A stable direct APK URL is also
+available, though checking its metadata and hash first is recommended:
+
+```text
+https://github.com/JSJ-Experiments/liveTranslate/releases/download/latest-prerelease/LiveTranslate-latest-arm64-v8a.apk
+```
+
 ## Build and test
 
 Builds intentionally run on Blacksmith, not a developer machine. Push a branch

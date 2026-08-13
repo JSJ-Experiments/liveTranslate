@@ -3,7 +3,6 @@ package com.jadenjsj.livetranslate
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -62,8 +61,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
@@ -172,9 +169,9 @@ private fun CompactTopBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val dotColor = when {
-            !state.isOnline || state.phase == SessionPhase.Error -> Color(0xFFE5484D)
-            state.phase in setOf(SessionPhase.Connecting, SessionPhase.Queued, SessionPhase.Sending, SessionPhase.Testing) -> Color(0xFFF4A62A)
-            state.phase in setOf(SessionPhase.Listening, SessionPhase.Translating) -> Color(0xFF20B86A)
+            !state.isOnline || state.phase == SessionPhase.Error -> MaterialTheme.colorScheme.error
+            state.phase in setOf(SessionPhase.Connecting, SessionPhase.Queued, SessionPhase.Sending, SessionPhase.Testing) -> MaterialTheme.colorScheme.secondary
+            state.phase in setOf(SessionPhase.Listening, SessionPhase.Translating) -> MaterialTheme.colorScheme.tertiary
             else -> MaterialTheme.colorScheme.outline
         }
         Box(
@@ -188,14 +185,12 @@ private fun CompactTopBar(
             Icon(
                 painterResource(R.drawable.ic_history),
                 "History",
-                tint = MaterialTheme.colorScheme.onSurface,
             )
         }
         IconButton(onClick = onOpenSettings, enabled = !state.isActive) {
             Icon(
                 painterResource(R.drawable.ic_settings),
                 "Settings",
-                tint = MaterialTheme.colorScheme.onSurface,
             )
         }
     }
@@ -227,8 +222,8 @@ private fun AttentionBanner(state: TranslationUiState, onRetry: () -> Unit, onCa
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp),
-        color = if (warning) Color(0xFFFFE9BF) else MaterialTheme.colorScheme.errorContainer,
-        contentColor = if (warning) Color(0xFF5F4200) else MaterialTheme.colorScheme.onErrorContainer,
+        color = if (warning) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
+        contentColor = if (warning) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
         shape = RoundedCornerShape(12.dp),
     ) {
         Row(
@@ -242,10 +237,16 @@ private fun AttentionBanner(state: TranslationUiState, onRetry: () -> Unit, onCa
                 fontWeight = FontWeight.SemiBold,
             )
             if (state.phase != SessionPhase.Testing) {
-                TextButton(onClick = onRetry) { Text("Retry") }
+                TextButton(
+                    onClick = onRetry,
+                    colors = ButtonDefaults.textButtonColors(contentColor = if (warning) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer),
+                ) { Text("Retry") }
             }
             if (state.phase == SessionPhase.Queued) {
-                TextButton(onClick = onCancelPending) { Text("Cancel") }
+                TextButton(
+                    onClick = onCancelPending,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSecondaryContainer),
+                ) { Text("Cancel") }
             }
         }
     }
@@ -312,8 +313,8 @@ private fun LiveTranscript(state: TranslationUiState, modifier: Modifier = Modif
 @Composable
 private fun LiveSegment(turn: TranslationTurn, active: Boolean) {
     val accent = when (turn.sourceLanguage?.substringBefore('-')) {
-        "zh" -> Color(0xFFEA6A8E)
-        "en" -> Color(0xFF2D8CFF)
+        "zh" -> MaterialTheme.colorScheme.tertiary
+        "en" -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.primary
     }
     Row(
@@ -399,15 +400,15 @@ private fun HistoryScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(painterResource(R.drawable.ic_back), "Back", tint = MaterialTheme.colorScheme.onSurface)
+                Icon(painterResource(R.drawable.ic_back), "Back")
             }
             Text("History", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             IconButton(onClick = onExport) {
-                Icon(painterResource(R.drawable.ic_share), "Export diagnostics", tint = MaterialTheme.colorScheme.onSurface)
+                Icon(painterResource(R.drawable.ic_share), "Export diagnostics")
             }
             IconButton(onClick = onClear, enabled = state.turns.isNotEmpty()) {
-                Icon(painterResource(R.drawable.ic_delete), "Clear history", tint = MaterialTheme.colorScheme.onSurface)
+                Icon(painterResource(R.drawable.ic_delete), "Clear history")
             }
         }
         if (state.turns.isEmpty()) {
@@ -498,7 +499,7 @@ private fun HistoryDetailScreen(
     ) {
         Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
-                Icon(painterResource(R.drawable.ic_back), "Back to sessions", tint = MaterialTheme.colorScheme.onSurface)
+                Icon(painterResource(R.drawable.ic_back), "Back to sessions")
             }
             Column {
                 Text("Saved session", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -608,7 +609,8 @@ private fun PushToTalk(
     onStop: () -> Unit,
 ) {
     val active = phase == SessionPhase.Connecting || phase == SessionPhase.Listening
-    val micColor = if (active) Color(0xFFE5484D) else MaterialTheme.colorScheme.primary
+    val micColor = if (active) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    val micContentColor = if (active) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary
     val color by animateColorAsState(micColor, label = "mic color")
     val pulse by rememberInfiniteTransition(label = "mic glow").animateFloat(
         initialValue = 0.10f,
@@ -674,7 +676,7 @@ private fun PushToTalk(
                     }
                 },
             color = color,
-            contentColor = Color.White,
+            contentColor = micContentColor,
             shape = RoundedCornerShape(20.dp),
             tonalElevation = if (active) 5.dp else 1.dp,
         ) {
@@ -687,10 +689,10 @@ private fun PushToTalk(
                     painterResource(R.drawable.ic_mic),
                     null,
                     Modifier.size(25.dp),
-                    tint = Color.White,
+                    tint = micContentColor,
                 )
                 Spacer(Modifier.size(10.dp))
-                Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = micContentColor)
             }
         }
     }
@@ -795,7 +797,7 @@ private fun SettingsSheet(
                         Text(
                             mode.description,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -840,7 +842,11 @@ private fun SettingsSheet(
                 ) {
                     Column(Modifier.padding(13.dp)) {
                         Text(mode.label, fontWeight = FontWeight.SemiBold)
-                        Text(mode.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            mode.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -890,7 +896,10 @@ private fun SettingsSheet(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !isTesting && apiKey.isNotBlank() && workspaceId.isNotBlank(),
                 onClick = { onTest(draft()) },
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ),
             ) {
                 if (isTesting) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 else Text("Test connection")
@@ -901,7 +910,7 @@ private fun SettingsSheet(
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (it.startsWith("Connected")) Color(0xFF20B86A) else MaterialTheme.colorScheme.error,
+                    color = if (it.startsWith("Connected")) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
                 )
             }
             Button(

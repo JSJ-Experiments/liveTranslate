@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -40,12 +40,15 @@ jobs:
         run: gradle --no-daemon :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
       - name: Create release files
         env:
-          VERSION: "0.5.2"
+          VERSION: "0.6.0"
         run: |
           mkdir -p release-dist
           apk="release-dist/LiveTranslate-v${VERSION}-arm64-v8a.apk"
           metadata="release-dist/LiveTranslate-v${VERSION}-metadata.json"
+          latest_apk="release-dist/LiveTranslate-latest-arm64-v8a.apk"
+          latest_metadata="release-dist/LiveTranslate-latest-metadata.json"
           cp app/build/outputs/apk/release/app-release.apk "$apk"
+          cp "$apk" "$latest_apk"
           sha256="$(sha256sum "$apk" | cut -d' ' -f1)"
           size="$(stat -c '%s' "$apk")"
           jq -n \
@@ -54,12 +57,15 @@ jobs:
             --argjson size "$size" \
             --arg commit "$GITHUB_SHA" \
             --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg repository "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             '{
               schemaVersion: 1,
               app: "Live Translate",
               packageName: "com.jadenjsj.livetranslate",
               versionName: $version,
-              versionCode: 9,
+              versionCode: 10,
+              channel: "prerelease",
+              releaseTag: ("v" + $version),
               buildType: "release",
               minSdk: 26,
               targetSdk: 36,
@@ -71,12 +77,33 @@ jobs:
               apkSizeBytes: $size,
               sourceCommit: $commit,
               buildRun: $run,
+              releasePage: ($repository + "/releases/tag/v" + $version),
+              apkUrl: ($repository + "/releases/download/v" + $version + "/LiveTranslate-v" + $version + "-arm64-v8a.apk"),
+              latestMetadataUrl: ($repository + "/releases/download/latest-prerelease/LiveTranslate-latest-metadata.json"),
+              latestApkUrl: ($repository + "/releases/download/latest-prerelease/LiveTranslate-latest-arm64-v8a.apk"),
               model: "qwen3.5-livetranslate-flash-realtime",
-              notes: "Pre-release. Starting another tap/hold session preserves the visible live conversation while each start/stop remains a separate correctly scoped history session."
+              notes: "Pre-release. Material 3 color-role audit for accessible light/dark contrast, official Material Symbols, and stable rolling update URLs."
             }' > "$metadata"
+          cp "$metadata" "$latest_metadata"
       - uses: actions/upload-artifact@v4
         with:
-          name: LiveTranslate-v0.5.2-arm64-v8a
+          name: LiveTranslate-v0.6.0-arm64-v8a
           path: release-dist/
           if-no-files-found: error
           retention-days: 14
+      - name: Publish stable latest-prerelease URLs
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view latest-prerelease >/dev/null 2>&1; then
+            gh release create latest-prerelease \
+              --target "$GITHUB_SHA" \
+              --title "Live Translate · latest prerelease" \
+              --prerelease \
+              --notes "Rolling prerelease assets for update clients. Read LiveTranslate-latest-metadata.json before downloading the APK."
+          fi
+          gh release upload latest-prerelease \
+            release-dist/LiveTranslate-latest-metadata.json \
+            release-dist/LiveTranslate-latest-arm64-v8a.apk \
+            --clobber
